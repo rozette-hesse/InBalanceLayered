@@ -1,10 +1,10 @@
 import streamlit as st
 import pandas as pd
+import joblib
 from datetime import date, timedelta
 from pathlib import Path
 
 from engine import layer1_period_predictor
-from engine import layer2a_phase_predictor
 from engine import layer_fusion
 
 
@@ -28,49 +28,32 @@ MUCUS_OPTIONS = ["unknown", "dry", "sticky", "creamy", "watery", "eggwhite"]
 
 @st.cache_resource
 def load_layer2_model():
-    """
-    Trains the real Layer 2A model once and caches it.
-    Put your training CSV in the repo root or adjust the path below.
-    """
-    possible_paths = [
-        Path("mcphases_with_estimated_cervical_mucus_v3.csv"),
-        Path("data/mcphases_with_estimated_cervical_mucus_v3.csv"),
-        Path("processed_data/mcphases_with_estimated_cervical_mucus_v3.csv"),
+    model_paths = [
+        Path("layer2a_clf_mucus.joblib"),
+        Path("models/layer2a_clf_mucus.joblib"),
+        Path("artifacts/layer2a_clf_mucus.joblib"),
+    ]
+    feature_paths = [
+        Path("layer2a_feature_cols.joblib"),
+        Path("models/layer2a_feature_cols.joblib"),
+        Path("artifacts/layer2a_feature_cols.joblib"),
     ]
 
-    train_path = None
-    for p in possible_paths:
-        if p.exists():
-            train_path = p
-            break
+    model_path = next((p for p in model_paths if p.exists()), None)
+    feature_path = next((p for p in feature_paths if p.exists()), None)
 
-    if train_path is None:
+    if model_path is None:
         raise FileNotFoundError(
-            "Could not find mcphases_with_estimated_cervical_mucus_v3.csv. "
-            "Place it in repo root, data/, or processed_data/."
+            "Could not find layer2a_clf_mucus.joblib. Upload it to the repo root, models/, or artifacts/."
+        )
+    if feature_path is None:
+        raise FileNotFoundError(
+            "Could not find layer2a_feature_cols.joblib. Upload it to the repo root, models/, or artifacts/."
         )
 
-    df_train = pd.read_csv(train_path)
-
-    predictor = layer2a_phase_predictor.Layer2APredictor(
-        config=layer2a_phase_predictor.Layer2AConfig(
-            target_col="phase",
-            group_col="id",
-            random_state=42,
-            test_size=0.2,
-            max_iter=3000,
-        ),
-        feature_builder=layer2a_phase_predictor.Layer2AFeatureBuilder(
-            mucus_type_col="cervical_mucus_estimated_type_final",
-            mucus_score_col="cervical_mucus_fertility_score_final",
-        ),
-    )
-    predictor.fit(df_train)
-    return predictor
-
-
-def safe_cycle_day(last_period_start: date, current_date: date) -> int:
-    return max(1, (current_date - last_period_start).days + 1)
+    clf_mucus = joblib.load(model_path)
+    feature_cols = joblib.load(feature_path)
+    return clf_mucus, feature_cols
 
 
 def build_layer2_input_row(
@@ -102,22 +85,99 @@ def build_layer2_input_row(
         **symptom_flags,
     }
 
-    # placeholders if needed by feature builder
+    # placeholders
     for pca_col in ["PC1", "PC2", "PC3", "PC4"]:
         row[pca_col] = 0.0
+
+    # optional engineered placeholders if missing
+    for extra_col in [
+        "symptom_burden_score",
+        "pain_score",
+        "recovery_score",
+        "mood_score",
+        "body_score",
+        "digestive_score",
+    ]:
+        row.setdefault(extra_col, 0.0)
 
     return pd.DataFrame([row])
 
 
-def extract_layer2_probs(pred_df: pd.DataFrame) -> dict:
-    probs = {}
-    for phase in ["Menstrual", "Follicular", "Fertility", "Luteal"]:
-        probs[phase] = float(pred_df.iloc[0].get(f"prob_{phase}", 0.0))
-    return probs
+def prepare_layer2_input_for_model(layer2_input: pd.DataFrame, feature_cols: list[str]) -> pd.DataFrame:
+    df = layer2_input.copy()
+
+    # basic composites from raw checkbox inputs
+    def mean_of(cols):
+        available = [c for c in cols if c in df.columns]
+        if not available:
+            return 0.0
+        return df[available].apply(pd.to_numeric, errors="coerce").mean(axis=1).fillna(0.0)
+
+    if "symptom_burden_score" in feature_cols:
+        df["symptom_burden_score"] = mean_of(
+            ["headaches", "cramps", "sorebreasts", "fatigue", "sleepissue",
+             "moodswing", "stress", "foodcravings", "indigestion", "bloating"]
+        )
+    if "pain_score" in feature_cols:
+        df["pain_score"] = mean_of(["cramps", "headaches", "sorebreasts", "bloating"])
+    if "recovery_score" in feature_cols:
+        df["recovery_score"] = mean_of(["fatigue", "sleepissue", "stress"])
+    if "mood_score" in feature_cols:
+        df["mood_score"] = mean_of(["moodswing", "stress", "foodcravings"])
+    if "body_score" in feature_cols:
+        df["body_score"] = mean_of(["cramps", "sorebreasts", "bloating", "indigestion"])
+    if "digestive_score" in feature_cols:
+        df["digestive_score"] = mean_of(["bloating", "indigestion", "foodcravings"])
+
+    # standardized mucus helpers if the saved model expects them
+    mucus_type = str(df.loc[df.index[0], "cervical_mucus_estimated_type_final"]).strip().lower()
+    df["cervical_mucus_type_std"] = mucus_type
+    df["cervical_mucus_score"] = pd.to_numeric(
+        df["cervical_mucus_fertility_score_final"], errors="coerce"
+    ).fillna(0.0)
+    df["mucus_fertile_flag"] = 1 if mucus_type in ["watery", "eggwhite"] else 0
+
+    # interaction terms if expected
+    interaction_pairs = [
+        ("cramps", "bloating"),
+        ("sorebreasts", "foodcravings"),
+        ("fatigue", "sleepissue"),
+        ("stress", "moodswing"),
+        ("pain_score", "body_score"),
+        ("digestive_score", "mood_score"),
+    ]
+    for a, b in interaction_pairs:
+        col = f"{a}__x__{b}"
+        if col in feature_cols:
+            a_val = pd.to_numeric(df[a], errors="coerce").fillna(0.0) if a in df.columns else 0.0
+            b_val = pd.to_numeric(df[b], errors="coerce").fillna(0.0) if b in df.columns else 0.0
+            df[col] = a_val * b_val
+
+    # ensure all required columns exist
+    for col in feature_cols:
+        if col not in df.columns:
+            df[col] = 0.0
+
+    # final order
+    df = df[feature_cols].copy()
+
+    # numeric cleanup
+    for col in df.columns:
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+
+    return df
+
+
+def extract_layer2_probs_from_model(clf_mucus, layer2_input_model: pd.DataFrame) -> tuple[str, dict]:
+    proba = clf_mucus.predict_proba(layer2_input_model)[0]
+    classes = clf_mucus.named_steps["model"].classes_
+    layer2_probs = {cls: float(p) for cls, p in zip(classes, proba)}
+    layer2_phase = classes[proba.argmax()]
+    return layer2_phase, layer2_probs
 
 
 st.title("InBalance Real Layer 1 + Layer 2 + Fusion")
-st.caption("Uses the real engine files from your repo.")
+st.caption("Uses the real saved Layer 2 model files.")
 
 left, right = st.columns([1.15, 1])
 
@@ -179,7 +239,7 @@ if run_btn:
     period_starts_sorted = sorted(period_starts)
     last_period_start = max(period_starts_sorted)
 
-    # -------- Layer 1 --------
+    # Layer 1
     layer1_out = layer1_period_predictor.get_layer1_output(
         period_starts=period_starts_sorted,
         current_date=log_date,
@@ -197,10 +257,10 @@ if run_btn:
     cycle_lengths = layer1_out.get("cycle_lengths", [])
     cycle_day = int(phase_prior["cycle_day"])
 
-    # -------- Layer 2 --------
-    predictor = load_layer2_model()
+    # Layer 2
+    clf_mucus, feature_cols = load_layer2_model()
 
-    layer2_input = build_layer2_input_row(
+    raw_layer2_input = build_layer2_input_row(
         log_date=log_date,
         last_period_start=last_period_start,
         cycle_day=cycle_day,
@@ -209,10 +269,10 @@ if run_btn:
         symptoms_selected=symptoms_selected,
     )
 
-    layer2_pred_df = predictor.predict(layer2_input)
-    layer2_probs = extract_layer2_probs(layer2_pred_df)
+    model_layer2_input = prepare_layer2_input_for_model(raw_layer2_input, feature_cols)
+    layer2_phase, layer2_probs = extract_layer2_probs_from_model(clf_mucus, model_layer2_input)
 
-    # -------- Fusion --------
+    # Fusion
     fusion_config = layer_fusion.LayerFusionConfig(
         layer1_weight=layer1_weight,
         layer2_weight=layer2_weight,
@@ -238,7 +298,7 @@ if run_btn:
 
     c1, c2, c3 = st.columns(3)
     c1.metric("Layer 1 baseline next period", str(baseline_next_period))
-    c2.metric("Layer 2 predicted phase", str(layer2_pred_df.iloc[0]["predicted_phase"]))
+    c2.metric("Layer 2 predicted phase", str(layer2_phase))
     c3.metric("Fusion predicted phase", str(fusion_result["predicted_phase"]))
 
     c4, c5, c6 = st.columns(3)
