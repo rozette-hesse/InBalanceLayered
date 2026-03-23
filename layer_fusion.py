@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
-import math
+from typing import Dict, Optional
 
 
 PHASES = ["Fertility", "Follicular", "Luteal", "Menstrual"]
@@ -10,26 +9,26 @@ PHASES = ["Fertility", "Follicular", "Luteal", "Menstrual"]
 
 @dataclass
 class LayerFusionConfig:
-    # how much to trust each layer
-    layer1_weight: float = 0.55
-    layer2_weight: float = 0.45
+    # Main fusion weights
+    layer1_weight: float = 0.20
+    layer2_weight: float = 0.80
 
-    # optional phase-specific trust adjustments
+    # Phase-specific light calibration on Layer 2
     menstrual_boost_from_layer2: float = 1.10
     fertility_boost_from_layer2: float = 1.15
     luteal_boost_from_layer2: float = 1.00
     follicular_boost_from_layer2: float = 0.95
 
-    # if confidence is low, widen uncertainty
+    # Confidence threshold
     low_confidence_threshold: float = 0.45
 
 
 def normalize_probs(probs: Dict[str, float]) -> Dict[str, float]:
     clean = {p: max(0.0, float(probs.get(p, 0.0))) for p in PHASES}
-    s = sum(clean.values())
-    if s <= 0:
+    total = sum(clean.values())
+    if total <= 0:
         return {p: 1.0 / len(PHASES) for p in PHASES}
-    return {p: v / s for p, v in clean.items()}
+    return {p: v / total for p, v in clean.items()}
 
 
 def confidence_from_probs(probs: Dict[str, float]) -> float:
@@ -42,7 +41,7 @@ def confidence_from_probs(probs: Dict[str, float]) -> float:
 def expected_phase_from_cycle_day(cycle_day: int, cycle_length: int = 28) -> str:
     """
     Simple Layer 1-style expected phase mapping.
-    You can later replace this with your full Layer 1 engine output.
+    Replace later with your stronger Layer 1 output if needed.
     """
     if cycle_day <= 5:
         return "Menstrual"
@@ -60,12 +59,9 @@ def expected_phase_from_cycle_day(cycle_day: int, cycle_length: int = 28) -> str
     return "Luteal"
 
 
-def layer1_phase_prior(
-    cycle_day: int,
-    cycle_length: int = 28
-) -> Dict[str, float]:
+def layer1_phase_prior(cycle_day: int, cycle_length: int = 28) -> Dict[str, float]:
     """
-    Converts Layer 1 timeline expectation into soft probabilities.
+    Converts Layer 1 cycle timing into soft phase probabilities.
     """
     phase = expected_phase_from_cycle_day(cycle_day, cycle_length)
 
@@ -110,8 +106,11 @@ def layer1_phase_prior(
 
 def apply_layer2_phase_adjustments(
     layer2_probs: Dict[str, float],
-    config: LayerFusionConfig
+    config: LayerFusionConfig,
 ) -> Dict[str, float]:
+    """
+    Small calibration step on Layer 2 probabilities.
+    """
     adjusted = dict(layer2_probs)
 
     adjusted["Menstrual"] *= config.menstrual_boost_from_layer2
@@ -125,10 +124,10 @@ def apply_layer2_phase_adjustments(
 def fuse_layer1_layer2(
     layer1_probs: Dict[str, float],
     layer2_probs: Dict[str, float],
-    config: Optional[LayerFusionConfig] = None
+    config: Optional[LayerFusionConfig] = None,
 ) -> Dict[str, object]:
     """
-    Combines Layer 1 and Layer 2 phase probabilities into one final decision.
+    Fuse Layer 1 and Layer 2 phase probabilities.
     """
     config = config or LayerFusionConfig()
 
@@ -146,7 +145,6 @@ def fuse_layer1_layer2(
     fused = normalize_probs(fused)
     predicted_phase = max(fused, key=fused.get)
     confidence = confidence_from_probs(fused)
-
     uncertainty_flag = confidence < config.low_confidence_threshold
 
     return {
@@ -163,7 +161,7 @@ def fuse_from_cycle_day_and_layer2(
     cycle_day: int,
     cycle_length: int,
     layer2_probs: Dict[str, float],
-    config: Optional[LayerFusionConfig] = None
+    config: Optional[LayerFusionConfig] = None,
 ) -> Dict[str, object]:
     """
     Convenience wrapper:
@@ -177,12 +175,13 @@ def fuse_from_cycle_day_and_layer2(
 def estimate_period_shift_days(
     fused_phase_probs: Dict[str, float],
     cycle_day: int,
-    cycle_length: int = 28
+    cycle_length: int = 28,
 ) -> int:
     """
-    Very simple first-pass shift logic.
-    Positive = period expected later
-    Negative = period expected earlier
+    First-pass rule-based period shift from fused phase probabilities.
+
+    Negative = next period expected earlier
+    Positive = next period expected later
     """
     probs = normalize_probs(fused_phase_probs)
 
@@ -190,19 +189,19 @@ def estimate_period_shift_days(
     fertility_p = probs["Fertility"]
     luteal_p = probs["Luteal"]
 
-    # If menstrual evidence is high, bring period closer
+    # Strong menstrual evidence -> period may come earlier
     if menstrual_p >= 0.60:
         return -2
     if menstrual_p >= 0.45:
         return -1
 
-    # If fertility evidence is still high late in cycle, ovulation may be delayed
+    # Fertility still high late in cycle -> possible delayed ovulation
     if cycle_day >= 14 and fertility_p >= 0.45:
         return +3
     if cycle_day >= 16 and fertility_p >= 0.30:
         return +2
 
-    # If luteal evidence is strong, keep baseline
+    # Strong luteal evidence -> keep baseline
     if luteal_p >= 0.50:
         return 0
 
@@ -212,15 +211,17 @@ def estimate_period_shift_days(
 def predict_with_fusion(
     cycle_day: int,
     cycle_length: int,
-    layer2_probs: Dict[str, float]
+    layer2_probs: Dict[str, float],
+    config: Optional[LayerFusionConfig] = None,
 ) -> Dict[str, object]:
     """
-    Main app-facing helper for Layer 1 + Layer 2 fusion.
+    Main app-facing helper.
     """
     fused = fuse_from_cycle_day_and_layer2(
         cycle_day=cycle_day,
         cycle_length=cycle_length,
         layer2_probs=layer2_probs,
+        config=config,
     )
 
     shift_days = estimate_period_shift_days(
@@ -234,8 +235,7 @@ def predict_with_fusion(
 
 
 if __name__ == "__main__":
-    # Example:
-    layer2_example = {
+    example_layer2 = {
         "Menstrual": 0.10,
         "Follicular": 0.18,
         "Fertility": 0.12,
@@ -245,7 +245,7 @@ if __name__ == "__main__":
     result = predict_with_fusion(
         cycle_day=22,
         cycle_length=29,
-        layer2_probs=layer2_example
+        layer2_probs=example_layer2,
     )
 
     print(result)
