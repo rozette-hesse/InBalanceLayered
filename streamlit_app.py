@@ -6,12 +6,9 @@ from typing import Dict, List
 # --------------------------------------------------
 # IMPORT YOUR REAL MODULES
 # --------------------------------------------------
-from layer1_period_predictor import predict_next_period_layer1
-from layer2a_phase_predictor import Layer2APredictor, Layer2AConfig, Layer2AFeatureBuilder
-from layer_fusion import (
-    LayerFusionConfig,
-    predict_with_fusion,
-)
+from engine.layer1_period_predictor import predict_next_period_layer1
+from engine.layer2a_phase_predictor import Layer2APredictor, Layer2AConfig, Layer2AFeatureBuilder
+from engine.layer_fusion import LayerFusionConfig, predict_with_fusion
 
 # --------------------------------------------------
 # APP CONFIG
