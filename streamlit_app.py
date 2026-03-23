@@ -1,40 +1,64 @@
 import streamlit as st
 import pandas as pd
+from datetime import date, timedelta
 
-# =========================================================
-# SIMPLE INBALANCE STREAMLIT GUI
-# Layer 1 + Layer 2A + Fusion
-# =========================================================
-
-PHASES = ["Menstrual", "Follicular", "Fertility", "Luteal"]
+st.set_page_config(page_title="InBalance Next Period Predictor", layout="wide")
 
 SYMPTOMS = [
-    "headaches",
     "cramps",
+    "bloating",
     "sorebreasts",
     "fatigue",
     "sleepissue",
     "moodswing",
     "stress",
     "foodcravings",
+    "headaches",
     "indigestion",
-    "bloating",
 ]
 
 MUCUS_OPTIONS = ["unknown", "dry", "sticky", "creamy", "watery", "eggwhite"]
 
 
 # =========================================================
-# LAYER 1
+# Layer 1
 # =========================================================
-def normalize_probs(probs: dict) -> dict:
-    total = sum(max(v, 0.0) for v in probs.values())
-    if total == 0:
-        return {k: 1 / len(probs) for k in probs}
-    return {k: max(v, 0.0) / total for k, v in probs.items()}
+def compute_cycle_lengths(period_starts):
+    period_starts = sorted(period_starts)
+    lengths = []
+    for i in range(1, len(period_starts)):
+        lengths.append((period_starts[i] - period_starts[i - 1]).days)
+    return lengths
 
 
-def expected_phase_from_cycle_day(cycle_day: int, cycle_length: int = 28) -> str:
+def weighted_average(values):
+    if not values:
+        return None
+    weights = list(range(1, len(values) + 1))
+    return sum(v * w for v, w in zip(values, weights)) / sum(weights)
+
+
+def layer1_predict_next_period(period_starts):
+    period_starts = sorted(period_starts)
+    if len(period_starts) < 2:
+        return None, None, None
+
+    cycle_lengths = compute_cycle_lengths(period_starts)
+    avg_cycle = round(weighted_average(cycle_lengths))
+    last_start = period_starts[-1]
+    baseline_next = last_start + timedelta(days=avg_cycle)
+
+    return baseline_next, avg_cycle, cycle_lengths
+
+
+# =========================================================
+# Layer 2
+# =========================================================
+def estimate_cycle_day(last_period_start, today):
+    return (today - last_period_start).days + 1
+
+
+def expected_phase_from_cycle_day(cycle_day, cycle_length=28):
     if cycle_day <= 5:
         return "Menstrual"
 
@@ -44,266 +68,170 @@ def expected_phase_from_cycle_day(cycle_day: int, cycle_length: int = 28) -> str
 
     if fertile_start <= cycle_day <= fertile_end:
         return "Fertility"
-
     if cycle_day < fertile_start:
         return "Follicular"
-
     return "Luteal"
 
 
-def layer1_phase_prior(cycle_day: int, cycle_length: int = 28) -> dict:
-    phase = expected_phase_from_cycle_day(cycle_day, cycle_length)
+def symptom_shift_logic(cycle_day, cycle_length, symptoms, mucus):
+    expected_phase = expected_phase_from_cycle_day(cycle_day, cycle_length)
+    shift_days = 0
+    reasons = []
 
-    priors = {
-        "Menstrual": 0.10,
-        "Follicular": 0.20,
-        "Fertility": 0.20,
-        "Luteal": 0.20,
-    }
+    has = lambda s: s in symptoms
 
-    if phase == "Menstrual":
-        priors.update({
-            "Menstrual": 0.60,
-            "Follicular": 0.15,
-            "Fertility": 0.05,
-            "Luteal": 0.20,
-        })
-    elif phase == "Follicular":
-        priors.update({
-            "Menstrual": 0.05,
-            "Follicular": 0.60,
-            "Fertility": 0.20,
-            "Luteal": 0.15,
-        })
-    elif phase == "Fertility":
-        priors.update({
-            "Menstrual": 0.02,
-            "Follicular": 0.18,
-            "Fertility": 0.62,
-            "Luteal": 0.18,
-        })
-    elif phase == "Luteal":
-        priors.update({
-            "Menstrual": 0.10,
-            "Follicular": 0.10,
-            "Fertility": 0.05,
-            "Luteal": 0.75,
-        })
+    # strong menstrual-like signals -> period may come sooner
+    if has("cramps"):
+        shift_days -= 1
+        reasons.append("Cramps suggest stronger menstrual-like timing.")
 
-    return normalize_probs(priors)
+    if has("cramps") and has("bloating"):
+        shift_days -= 1
+        reasons.append("Cramps + bloating increase early-period likelihood.")
 
+    # luteal / PMS build-up
+    luteal_score = 0
+    for s in ["sorebreasts", "bloating", "foodcravings", "moodswing", "fatigue", "sleepissue"]:
+        if has(s):
+            luteal_score += 1
 
-# =========================================================
-# LAYER 2A
-# SIMPLE APPROXIMATION FOR GUI DEMO
-# Replace later with your trained model if needed
-# =========================================================
-def layer2a_symptom_mucus_engine(symptoms: dict, mucus: str) -> dict:
-    score = {
-        "Menstrual": 0.05,
-        "Follicular": 0.08,
-        "Fertility": 0.08,
-        "Luteal": 0.08,
-    }
+    if luteal_score >= 3:
+        reasons.append("Symptoms are consistent with a luteal/PMS pattern.")
 
-    # symptom logic
-    if symptoms.get("cramps", False):
-        score["Menstrual"] += 0.28
-
-    if symptoms.get("bloating", False):
-        score["Menstrual"] += 0.08
-        score["Luteal"] += 0.08
-
-    if symptoms.get("sorebreasts", False):
-        score["Luteal"] += 0.20
-
-    if symptoms.get("foodcravings", False):
-        score["Luteal"] += 0.12
-
-    if symptoms.get("moodswing", False):
-        score["Luteal"] += 0.10
-
-    if symptoms.get("sleepissue", False):
-        score["Luteal"] += 0.08
-
-    if symptoms.get("fatigue", False):
-        score["Luteal"] += 0.08
-        score["Menstrual"] += 0.05
-
-    if symptoms.get("headaches", False):
-        score["Menstrual"] += 0.05
-        score["Luteal"] += 0.05
-
-    if symptoms.get("stress", False):
-        score["Luteal"] += 0.05
-
-    if symptoms.get("indigestion", False):
-        score["Luteal"] += 0.04
-
-    # mucus logic
-    if mucus == "dry":
-        score["Follicular"] += 0.06
-    elif mucus == "sticky":
-        score["Follicular"] += 0.08
-    elif mucus == "creamy":
-        score["Follicular"] += 0.16
-        score["Fertility"] += 0.08
-    elif mucus == "watery":
-        score["Fertility"] += 0.35
-    elif mucus == "eggwhite":
-        score["Fertility"] += 0.48
-
+    # mucus-driven fertility / delayed ovulation logic
     if mucus in ["watery", "eggwhite"]:
-        score["Menstrual"] = max(0.01, score["Menstrual"] - 0.08)
+        if cycle_day >= 12:
+            shift_days += 2
+            reasons.append("Fertile cervical mucus suggests ovulation may still be active/later.")
+        else:
+            shift_days += 1
+            reasons.append("Fertile cervical mucus slightly delays next-period expectation.")
 
-    return normalize_probs(score)
+    elif mucus == "creamy":
+        shift_days += 1
+        reasons.append("Creamy mucus slightly supports approaching fertility rather than late luteal timing.")
 
+    # if clearly luteal by day timing and PMS symptoms present, keep near baseline
+    if expected_phase == "Luteal" and luteal_score >= 2:
+        reasons.append("Expected phase and symptoms are aligned, so only a small shift is applied.")
 
-# =========================================================
-# FUSION
-# =========================================================
-def apply_layer2_phase_adjustments(
-    layer2_probs: dict,
-    menstrual_boost: float = 1.10,
-    fertility_boost: float = 1.15,
-    luteal_boost: float = 1.00,
-    follicular_boost: float = 0.95,
-) -> dict:
-    adjusted = dict(layer2_probs)
-    adjusted["Menstrual"] *= menstrual_boost
-    adjusted["Fertility"] *= fertility_boost
-    adjusted["Luteal"] *= luteal_boost
-    adjusted["Follicular"] *= follicular_boost
-    return normalize_probs(adjusted)
+    # extra guardrails
+    shift_days = max(-3, min(5, shift_days))
 
-
-def fuse_layer1_layer2(
-    layer1_probs: dict,
-    layer2_probs: dict,
-    layer1_weight: float = 0.20,
-    layer2_weight: float = 0.80,
-) -> dict:
-    p1 = normalize_probs(layer1_probs)
-    p2 = normalize_probs(layer2_probs)
-    p2 = apply_layer2_phase_adjustments(p2)
-
-    fused = {}
-    for phase in PHASES:
-        fused[phase] = layer1_weight * p1[phase] + layer2_weight * p2[phase]
-
-    return normalize_probs(fused)
-
-
-def confidence_from_probs(probs: dict) -> float:
-    ordered = sorted(probs.values(), reverse=True)
-    top1 = ordered[0]
-    top2 = ordered[1] if len(ordered) > 1 else 0.0
-    return top1 - top2
-
-
-def predict_with_fusion(
-    cycle_day: int,
-    cycle_length: int,
-    symptoms: dict,
-    mucus: str,
-    layer1_weight: float,
-    layer2_weight: float,
-):
-    layer1_probs = layer1_phase_prior(cycle_day, cycle_length)
-    layer2_probs = layer2a_symptom_mucus_engine(symptoms, mucus)
-    fused_probs = fuse_layer1_layer2(
-        layer1_probs=layer1_probs,
-        layer2_probs=layer2_probs,
-        layer1_weight=layer1_weight,
-        layer2_weight=layer2_weight,
-    )
-
-    predicted_phase = max(fused_probs, key=fused_probs.get)
-    confidence = confidence_from_probs(fused_probs)
-
-    return {
-        "predicted_phase": predicted_phase,
-        "confidence": confidence,
-        "layer1_probs": layer1_probs,
-        "layer2_probs": layer2_probs,
-        "fused_probs": fused_probs,
-    }
+    return shift_days, expected_phase, reasons
 
 
 # =========================================================
-# STREAMLIT UI
+# UI
 # =========================================================
-st.set_page_config(page_title="InBalance Cycle Engine", layout="wide")
+st.title("InBalance Next Period Shift Demo")
+st.caption("Enter period history, log symptoms for a chosen day, and see how Layer 2 shifts the next-period prediction.")
 
-st.title("InBalance Cycle Engine")
-st.caption("Layer 1 + Layer 2A + Fusion demo")
+left, right = st.columns([1.2, 1])
 
-col1, col2 = st.columns([1, 1])
+with left:
+    st.subheader("1) Period history")
 
-with col1:
-    st.subheader("Cycle inputs")
-    cycle_day = st.number_input("Cycle day", min_value=1, max_value=60, value=22, step=1)
-    cycle_length = st.number_input("Cycle length", min_value=20, max_value=45, value=28, step=1)
-    mucus = st.selectbox("Cervical mucus", MUCUS_OPTIONS, index=5)
+    n_periods = st.number_input("How many periods do you want to enter?", min_value=2, max_value=12, value=3, step=1)
 
-    st.subheader("Symptoms")
-    symptoms = {}
-    symptom_cols = st.columns(2)
-    for i, symptom in enumerate(SYMPTOMS):
-        with symptom_cols[i % 2]:
-            symptoms[symptom] = st.checkbox(symptom, value=symptom in ["sorebreasts", "fatigue", "foodcravings", "bloating"])
+    period_rows = []
+    today_default = date.today()
 
-with col2:
-    st.subheader("Fusion weights")
-    layer1_weight = st.slider("Layer 1 weight", min_value=0.0, max_value=1.0, value=0.20, step=0.05)
-    layer2_weight = round(1.0 - layer1_weight, 2)
-    st.write(f"Layer 2 weight: **{layer2_weight}**")
+    for i in range(int(n_periods)):
+        st.markdown(f"**Period {i+1}**")
+        c1, c2 = st.columns(2)
+        with c1:
+            start = st.date_input(
+                f"Start date #{i+1}",
+                value=today_default - timedelta(days=(int(n_periods) - i) * 30),
+                key=f"start_{i}",
+            )
+        with c2:
+            end = st.date_input(
+                f"End date #{i+1}",
+                value=today_default - timedelta(days=(int(n_periods) - i) * 30 - 4),
+                key=f"end_{i}",
+            )
+        period_rows.append({"start": start, "end": end})
 
-    result = predict_with_fusion(
-        cycle_day=int(cycle_day),
-        cycle_length=int(cycle_length),
-        symptoms=symptoms,
-        mucus=mucus,
-        layer1_weight=layer1_weight,
-        layer2_weight=layer2_weight,
+    period_df = pd.DataFrame(period_rows)
+
+    st.subheader("2) Symptom log for a chosen day")
+
+    log_date = st.date_input("Symptom log date", value=today_default, key="log_date")
+    mucus = st.selectbox("Cervical mucus", MUCUS_OPTIONS, index=0)
+
+    selected_symptoms = st.multiselect(
+        "Choose symptoms for that day",
+        SYMPTOMS,
+        default=[]
     )
 
-    st.subheader("Final output")
-    st.metric("Predicted phase", result["predicted_phase"])
-    st.metric("Confidence", f"{result['confidence']:.2f}")
+with right:
+    st.subheader("3) Prediction")
 
-    st.write("Expected phase from Layer 1:", expected_phase_from_cycle_day(int(cycle_day), int(cycle_length)))
+    valid_periods = True
+    starts = []
+    errors = []
 
-st.divider()
+    for idx, row in period_df.iterrows():
+        s = row["start"]
+        e = row["end"]
+        if e < s:
+            valid_periods = False
+            errors.append(f"Period {idx+1}: end date is before start date.")
+        starts.append(s)
 
-tab1, tab2, tab3 = st.tabs(["Layer 1", "Layer 2A", "Fusion"])
+    starts = sorted(starts)
 
-with tab1:
-    st.subheader("Layer 1 probabilities")
-    layer1_df = pd.DataFrame(
-        {"Phase": list(result["layer1_probs"].keys()), "Probability": list(result["layer1_probs"].values())}
-    )
-    st.dataframe(layer1_df, use_container_width=True)
-    for phase, prob in result["layer1_probs"].items():
-        st.write(f"**{phase}**")
-        st.progress(float(prob))
+    if not valid_periods:
+        for err in errors:
+            st.error(err)
+    else:
+        baseline_next, avg_cycle, cycle_lengths = layer1_predict_next_period(starts)
 
-with tab2:
-    st.subheader("Layer 2A probabilities")
-    layer2_df = pd.DataFrame(
-        {"Phase": list(result["layer2_probs"].keys()), "Probability": list(result["layer2_probs"].values())}
-    )
-    st.dataframe(layer2_df, use_container_width=True)
-    for phase, prob in result["layer2_probs"].items():
-        st.write(f"**{phase}**")
-        st.progress(float(prob))
+        if baseline_next is None:
+            st.warning("Please enter at least 2 period start dates.")
+        else:
+            last_start = starts[-1]
+            cycle_day = estimate_cycle_day(last_start, log_date)
+            shift_days, expected_phase, reasons = symptom_shift_logic(
+                cycle_day=cycle_day,
+                cycle_length=avg_cycle,
+                symptoms=selected_symptoms,
+                mucus=mucus,
+            )
+            adjusted_next = baseline_next + timedelta(days=shift_days)
 
-with tab3:
-    st.subheader("Fused probabilities")
-    fused_df = pd.DataFrame(
-        {"Phase": list(result["fused_probs"].keys()), "Probability": list(result["fused_probs"].values())}
-    ).sort_values("Probability", ascending=False)
-    st.dataframe(fused_df, use_container_width=True)
-    for phase, prob in result["fused_probs"].items():
-        st.write(f"**{phase}**")
-        st.progress(float(prob))
+            st.metric("Layer 1 baseline next period", baseline_next.strftime("%Y-%m-%d"))
+            st.metric("Average cycle length", f"{avg_cycle} days")
+            st.metric("Cycle day on symptom log date", cycle_day)
+            st.metric("Expected phase from timing", expected_phase)
+            st.metric("Layer 2 shift", f"{shift_days:+d} day(s)")
+            st.metric("Final adjusted next period", adjusted_next.strftime("%Y-%m-%d"))
+
+            st.markdown("---")
+            st.subheader("Explanation")
+
+            if reasons:
+                for r in reasons:
+                    st.write(f"- {r}")
+            else:
+                st.write("- No strong symptom-based shift detected. Baseline was kept close to Layer 1.")
+
+            st.markdown("---")
+            st.subheader("History summary")
+            st.write(f"Period starts: {[d.strftime('%Y-%m-%d') for d in starts]}")
+            st.write(f"Cycle lengths used: {cycle_lengths}")
+
+            history_df = pd.DataFrame({
+                "Period Start": [d.strftime("%Y-%m-%d") for d in starts[1:]],
+                "Cycle Length From Previous": cycle_lengths
+            })
+            st.dataframe(history_df, use_container_width=True)
+
+st.markdown("---")
+st.info(
+    "This is a prototype demo flow: Layer 1 gives the baseline next-period date from cycle history, "
+    "and Layer 2 shifts it based on symptoms and cervical mucus logged for a chosen day."
+)
