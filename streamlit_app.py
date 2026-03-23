@@ -1,17 +1,13 @@
 import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
-from typing import Dict, List
+from pathlib import Path
 
-# --------------------------------------------------
-# IMPORT YOUR REAL MODULES
-# --------------------------------------------------
 from engine import layer1_period_predictor
 from engine import layer2a_phase_predictor
 from engine import layer_fusion
-# --------------------------------------------------
-# APP CONFIG
-# --------------------------------------------------
+
+
 st.set_page_config(page_title="InBalance Real Cycle Engine", layout="wide")
 
 SYMPTOMS = [
@@ -29,36 +25,42 @@ SYMPTOMS = [
 
 MUCUS_OPTIONS = ["unknown", "dry", "sticky", "creamy", "watery", "eggwhite"]
 
-# --------------------------------------------------
-# CACHED MODEL LOADING
-# --------------------------------------------------
+
 @st.cache_resource
 def load_layer2_model():
     """
-    Option A:
-    If you saved a trained Layer2APredictor object with pickle/joblib, load it here.
-
-    Option B:
-    If you only have code and training data, you can fit it here once and cache it.
+    Trains the real Layer 2A model once and caches it.
+    Put your training CSV in the repo root or adjust the path below.
     """
-    # ---------- OPTION A: load pretrained model ----------
-    # import joblib
-    # predictor = joblib.load("layer2a_predictor.joblib")
-    # return predictor
+    possible_paths = [
+        Path("mcphases_with_estimated_cervical_mucus_v3.csv"),
+        Path("data/mcphases_with_estimated_cervical_mucus_v3.csv"),
+        Path("processed_data/mcphases_with_estimated_cervical_mucus_v3.csv"),
+    ]
 
-    # ---------- OPTION B: fit from training file ----------
-    training_path = "mcphases_with_estimated_cervical_mucus_v3.csv"
-    df_train = pd.read_csv(training_path)
+    train_path = None
+    for p in possible_paths:
+        if p.exists():
+            train_path = p
+            break
 
-    predictor = Layer2APredictor(
-        config=Layer2AConfig(
+    if train_path is None:
+        raise FileNotFoundError(
+            "Could not find mcphases_with_estimated_cervical_mucus_v3.csv. "
+            "Place it in repo root, data/, or processed_data/."
+        )
+
+    df_train = pd.read_csv(train_path)
+
+    predictor = layer2a_phase_predictor.Layer2APredictor(
+        config=layer2a_phase_predictor.Layer2AConfig(
             target_col="phase",
             group_col="id",
             random_state=42,
             test_size=0.2,
             max_iter=3000,
         ),
-        feature_builder=Layer2AFeatureBuilder(
+        feature_builder=layer2a_phase_predictor.Layer2AFeatureBuilder(
             mucus_type_col="cervical_mucus_estimated_type_final",
             mucus_score_col="cervical_mucus_fertility_score_final",
         ),
@@ -67,20 +69,18 @@ def load_layer2_model():
     return predictor
 
 
-# --------------------------------------------------
-# HELPERS
-# --------------------------------------------------
+def safe_cycle_day(last_period_start: date, current_date: date) -> int:
+    return max(1, (current_date - last_period_start).days + 1)
+
+
 def build_layer2_input_row(
     log_date: date,
     last_period_start: date,
     cycle_day: int,
     cycle_length: int,
     mucus_type: str,
-    symptoms_selected: List[str],
+    symptoms_selected: list[str],
 ) -> pd.DataFrame:
-    """
-    Build one-row dataframe using the real feature names expected by Layer 2A.
-    """
     symptom_flags = {s: 1 if s in symptoms_selected else 0 for s in SYMPTOMS}
 
     mucus_score_map = {
@@ -102,37 +102,27 @@ def build_layer2_input_row(
         **symptom_flags,
     }
 
-    # If your Layer2A code expects PCA columns but computes missing columns safely, leave them out.
-    # If needed, add placeholders:
+    # placeholders if needed by feature builder
     for pca_col in ["PC1", "PC2", "PC3", "PC4"]:
         row[pca_col] = 0.0
 
     return pd.DataFrame([row])
 
 
-def extract_layer2_probs(pred_df: pd.DataFrame) -> Dict[str, float]:
+def extract_layer2_probs(pred_df: pd.DataFrame) -> dict:
     probs = {}
     for phase in ["Menstrual", "Follicular", "Fertility", "Luteal"]:
-        col = f"prob_{phase}"
-        probs[phase] = float(pred_df.iloc[0].get(col, 0.0))
+        probs[phase] = float(pred_df.iloc[0].get(f"prob_{phase}", 0.0))
     return probs
 
 
-def safe_cycle_day(last_period_start: date, current_date: date) -> int:
-    return max(1, (current_date - last_period_start).days + 1)
-
-
-# --------------------------------------------------
-# UI
-# --------------------------------------------------
 st.title("InBalance Real Layer 1 + Layer 2 + Fusion")
-st.caption("Uses your real Python modules, not the demo approximation.")
+st.caption("Uses the real engine files from your repo.")
 
 left, right = st.columns([1.15, 1])
 
 with left:
     st.subheader("1) Period history")
-
     n_periods = st.number_input(
         "How many period starts do you want to enter?",
         min_value=2,
@@ -141,7 +131,7 @@ with left:
         step=1,
     )
 
-    default_today = date.today()
+    today_default = date.today()
     period_starts = []
     period_ends = []
 
@@ -149,45 +139,34 @@ with left:
         st.markdown(f"**Period {i+1}**")
         c1, c2 = st.columns(2)
         with c1:
-            p_start = st.date_input(
+            start = st.date_input(
                 f"Start date #{i+1}",
-                value=default_today - timedelta(days=(int(n_periods) - i) * 30),
+                value=today_default - timedelta(days=(int(n_periods) - i) * 30),
                 key=f"start_{i}",
             )
         with c2:
-            p_end = st.date_input(
+            end = st.date_input(
                 f"End date #{i+1}",
-                value=default_today - timedelta(days=(int(n_periods) - i) * 30 - 4),
+                value=today_default - timedelta(days=(int(n_periods) - i) * 30 - 4),
                 key=f"end_{i}",
             )
-        period_starts.append(p_start)
-        period_ends.append(p_end)
+        period_starts.append(start)
+        period_ends.append(end)
 
     st.subheader("2) Symptom log")
-    log_date = st.date_input("Symptom log date", value=default_today)
+    log_date = st.date_input("Symptom log date", value=today_default)
     mucus_type = st.selectbox("Cervical mucus", MUCUS_OPTIONS, index=0)
-
-    symptoms_selected = st.multiselect(
-        "Choose symptoms for that day",
-        SYMPTOMS,
-        default=[],
-    )
+    symptoms_selected = st.multiselect("Choose symptoms for that day", SYMPTOMS, default=[])
 
 with right:
     st.subheader("3) Fusion settings")
     layer1_weight = st.slider("Layer 1 weight", 0.0, 1.0, 0.20, 0.05)
     layer2_weight = round(1.0 - layer1_weight, 2)
     st.write(f"Layer 2 weight: **{layer2_weight}**")
-
-    st.markdown("---")
     run_btn = st.button("Run real prediction", type="primary", use_container_width=True)
 
-# --------------------------------------------------
-# MAIN EXECUTION
-# --------------------------------------------------
 if run_btn:
     errors = []
-
     for i, (s, e) in enumerate(zip(period_starts, period_ends), start=1):
         if e < s:
             errors.append(f"Period {i}: end date is before start date.")
@@ -198,26 +177,27 @@ if run_btn:
         st.stop()
 
     period_starts_sorted = sorted(period_starts)
-
-    # ---------- Layer 1 ----------
-    # Expected signature:
-    # predict_next_period_layer1(period_starts: List[date]) -> dict
-    # Example returned keys:
-    # {
-    #   "predicted_next_period": date,
-    #   "cycle_length_estimate": int,
-    #   "cycle_lengths": [...]
-    # }
-    layer1_result = predict_next_period_layer1(period_starts_sorted)
-
-    baseline_next_period = layer1_result["predicted_next_period"]
-    cycle_length_estimate = int(layer1_result["cycle_length_estimate"])
-    cycle_lengths = layer1_result.get("cycle_lengths", [])
-
     last_period_start = max(period_starts_sorted)
-    cycle_day = safe_cycle_day(last_period_start, log_date)
 
-    # ---------- Layer 2 ----------
+    # -------- Layer 1 --------
+    layer1_out = layer1_period_predictor.get_layer1_output(
+        period_starts=period_starts_sorted,
+        current_date=log_date,
+    )
+
+    prediction = layer1_out.get("prediction")
+    phase_prior = layer1_out.get("phase_prior")
+
+    if prediction is None or phase_prior is None:
+        st.error("Layer 1 could not generate output. Please enter at least 2 valid period starts.")
+        st.stop()
+
+    baseline_next_period = pd.Timestamp(prediction["predicted_start"]).date()
+    cycle_length_estimate = int(prediction["estimated_cycle_length"])
+    cycle_lengths = layer1_out.get("cycle_lengths", [])
+    cycle_day = int(phase_prior["cycle_day"])
+
+    # -------- Layer 2 --------
     predictor = load_layer2_model()
 
     layer2_input = build_layer2_input_row(
@@ -232,8 +212,8 @@ if run_btn:
     layer2_pred_df = predictor.predict(layer2_input)
     layer2_probs = extract_layer2_probs(layer2_pred_df)
 
-    # ---------- Fusion ----------
-    fusion_config = LayerFusionConfig(
+    # -------- Fusion --------
+    fusion_config = layer_fusion.LayerFusionConfig(
         layer1_weight=layer1_weight,
         layer2_weight=layer2_weight,
         menstrual_boost_from_layer2=1.10,
@@ -243,7 +223,7 @@ if run_btn:
         low_confidence_threshold=0.45,
     )
 
-    fusion_result = predict_with_fusion(
+    fusion_result = layer_fusion.predict_with_fusion(
         cycle_day=cycle_day,
         cycle_length=cycle_length_estimate,
         layer2_probs=layer2_probs,
@@ -253,9 +233,6 @@ if run_btn:
     shift_days = int(fusion_result["period_shift_days"])
     adjusted_next_period = baseline_next_period + timedelta(days=shift_days)
 
-    # --------------------------------------------------
-    # OUTPUT
-    # --------------------------------------------------
     st.markdown("---")
     st.subheader("Results")
 
@@ -274,45 +251,50 @@ if run_btn:
     st.markdown("---")
     st.subheader("Layer comparison")
 
-    out1, out2, out3 = st.columns(3)
+    a, b, c = st.columns(3)
 
-    with out1:
+    with a:
         st.markdown("**Layer 1 summary**")
-        st.write(f"Last period start: {last_period_start}")
         st.write(f"Cycle lengths used: {cycle_lengths}")
+        st.write(f"Likely phase: {phase_prior['likely_phase']}")
+        st.dataframe(
+            pd.DataFrame({
+                "Phase": list(phase_prior["phase_probabilities"].keys()),
+                "Probability": list(phase_prior["phase_probabilities"].values()),
+            }),
+            use_container_width=True,
+        )
 
-    with out2:
+    with b:
         st.markdown("**Layer 2 probabilities**")
-        layer2_probs_df = pd.DataFrame(
-            {"Phase": list(layer2_probs.keys()), "Probability": list(layer2_probs.values())}
-        ).sort_values("Probability", ascending=False)
-        st.dataframe(layer2_probs_df, use_container_width=True)
+        st.dataframe(
+            pd.DataFrame({
+                "Phase": list(layer2_probs.keys()),
+                "Probability": list(layer2_probs.values()),
+            }).sort_values("Probability", ascending=False),
+            use_container_width=True,
+        )
 
-    with out3:
+    with c:
         st.markdown("**Fusion probabilities**")
-        fusion_probs_df = pd.DataFrame(
-            {
+        st.dataframe(
+            pd.DataFrame({
                 "Phase": list(fusion_result["phase_probabilities"].keys()),
                 "Probability": list(fusion_result["phase_probabilities"].values()),
-            }
-        ).sort_values("Probability", ascending=False)
-        st.dataframe(fusion_probs_df, use_container_width=True)
+            }).sort_values("Probability", ascending=False),
+            use_container_width=True,
+        )
 
     st.markdown("---")
-    st.subheader("Inputs used")
-
-    input_summary = pd.DataFrame(
-        {
-            "Field": [
-                "Log date",
-                "Cervical mucus",
-                "Selected symptoms",
-            ],
+    st.subheader("Input summary")
+    st.dataframe(
+        pd.DataFrame({
+            "Field": ["Log date", "Cervical mucus", "Symptoms"],
             "Value": [
                 str(log_date),
                 mucus_type,
                 ", ".join(symptoms_selected) if symptoms_selected else "None",
             ],
-        }
+        }),
+        use_container_width=True,
     )
-    st.dataframe(input_summary, use_container_width=True)
