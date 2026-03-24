@@ -1,9 +1,9 @@
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import joblib
 import pandas as pd
 
-from .config import ARTIFACTS_DIR, SUPPORTED_SYMPTOMS
+from .config import ARTIFACTS_DIR, SUPPORTED_SYMPTOMS, PCA_EXTRA_INPUTS
 
 
 def mucus_to_score(mucus: str) -> int:
@@ -22,18 +22,38 @@ def mucus_to_fertile_flag(mucus: str) -> int:
     return int((mucus or "").lower() in {"watery", "eggwhite"})
 
 
-def build_base_flags(symptoms: List[str]) -> Dict[str, int]:
+def build_base_flags(
+    symptoms: List[str],
+    appetite: int = 0,
+    exerciselevel: int = 0,
+) -> Dict[str, int]:
     symptom_set = set(symptoms or [])
-    return {sym: int(sym in symptom_set) for sym in SUPPORTED_SYMPTOMS}
+
+    row = {sym: int(sym in symptom_set) for sym in SUPPORTED_SYMPTOMS}
+
+    # PCA-only inputs
+    row["appetite"] = int(appetite)
+    row["exerciselevel"] = int(exerciselevel)
+
+    return row
 
 
-def build_engineered_features(symptoms: List[str], cervical_mucus: str) -> pd.DataFrame:
+def build_engineered_features(
+    symptoms: List[str],
+    cervical_mucus: str,
+    appetite: int = 0,
+    exerciselevel: int = 0,
+) -> pd.DataFrame:
     artifacts = joblib.load(ARTIFACTS_DIR / "layer2a_artifacts.joblib")
     feature_cols = artifacts["feature_cols"]
     pca = artifacts["pca"]
     pca_input_cols = artifacts["pca_input_cols"]
 
-    row = build_base_flags(symptoms)
+    row = build_base_flags(
+        symptoms=symptoms,
+        appetite=appetite,
+        exerciselevel=exerciselevel,
+    )
 
     row["symptom_burden_score"] = sum(row[s] for s in SUPPORTED_SYMPTOMS)
     row["pain_score"] = row["cramps"] + row["headaches"]
@@ -55,16 +75,27 @@ def build_engineered_features(symptoms: List[str], cervical_mucus: str) -> pd.Da
     pca_input_df = pd.DataFrame([{col: row.get(col, 0) for col in pca_input_cols}])
     pcs = pca.transform(pca_input_df)
 
-    for i in range(pcs.shape[1]):
+    # Your model expects PC1-PC4
+    for i in range(4):
         row[f"PC{i+1}"] = float(pcs[0, i])
 
     X = pd.DataFrame([{col: row.get(col, 0) for col in feature_cols}])
     return X
 
 
-def get_layer2_output(symptoms: List[str], cervical_mucus: str) -> Dict[str, object]:
+def get_layer2_output(
+    symptoms: List[str],
+    cervical_mucus: str,
+    appetite: int = 0,
+    exerciselevel: int = 0,
+) -> Dict[str, object]:
     model = joblib.load(ARTIFACTS_DIR / "layer2a_clf_mucus.joblib")
-    X = build_engineered_features(symptoms, cervical_mucus)
+    X = build_engineered_features(
+        symptoms=symptoms,
+        cervical_mucus=cervical_mucus,
+        appetite=appetite,
+        exerciselevel=exerciselevel,
+    )
 
     probs = model.predict_proba(X)[0]
     classes = list(model.classes_)
