@@ -66,7 +66,7 @@ if "period_defaults" not in st.session_state:
     ]
 
 st.title("InBalance Cycle Engine")
-st.write("Layer 1 = period history, Layer 2 = trained symptom model, Fusion = final output")
+st.write("Layer 1 = forecast engine, Layer 2 = daily status engine, Layer 3 = timing consistency")
 
 st.subheader("1) Period history")
 
@@ -145,47 +145,51 @@ if run:
     bleed_lengths = compute_bleed_lengths(period_rows)
     avg_bleed_length = safe_avg(bleed_lengths)
 
-    layer1_top = max(result["layer1"]["phase_probs"], key=result["layer1"]["phase_probs"].get)
-    layer2_top = result["layer2"]["top_phase"] if result["layer2"] else None
-    final_top = result["final_phase"]
-
-    st.subheader("Prediction summary")
-    a, b, c = st.columns(3)
+    st.subheader("Today at a glance")
+    a, b, c, d = st.columns(4)
     with a:
-        st.metric("Cycle day today", result["layer1"].get("cycle_day"))
+        st.metric("Cycle day", result["layer1"].get("cycle_day"))
     with b:
-        st.metric("Predicted next period", result["layer1"].get("predicted_next_period"))
+        st.metric("Current phase", result["final_phase"])
     with c:
-        st.metric("Final predicted phase", final_top)
-
-    d, e = st.columns(2)
+        next_period_value = result["layer1"].get("predicted_next_period") or "N/A"
+        st.metric("Expected next period", next_period_value)
     with d:
-        st.metric("Estimated cycle length", result["layer1"].get("estimated_cycle_length"))
-    with e:
-        st.metric("Average bleed length", avg_bleed_length if avg_bleed_length is not None else "N/A")
+        fert_status = result["layer2"]["fertility_status"] if result["layer2"] else "Need More Data"
+        st.metric("Daily status", fert_status)
 
-    st.subheader("How the prediction changed")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.info(f"**Layer 1**\n\n{layer1_top}")
-    with col2:
-        if layer2_top:
-            st.info(f"**Layer 2**\n\n{layer2_top}")
-        else:
-            st.info("**Layer 2**\n\nNo symptom input")
-    with col3:
-        st.success(f"**Final**\n\n{final_top}")
+    st.subheader("Layer 1 — Forecast")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric("Estimated cycle length", result["layer1"].get("estimated_cycle_length"))
+    with c2:
+        st.metric("Average bleed length", avg_bleed_length if avg_bleed_length is not None else "N/A")
+    with c3:
+        st.metric("Forecast confidence", result["layer1"].get("forecast_confidence"))
+
+    st.write("**Possible ovulation date:**", result["layer1"].get("possible_ovulation_date"))
+    st.write("**Fertile window:**", result["layer1"].get("fertile_window"))
+    st.write("**Next period window:**", result["layer1"].get("next_period_window"))
+    st.write("**Regularity:**", result["layer1"].get("regularity_status"))
 
     if result["layer2"] is not None:
-        st.write(
-            f"Based on period history alone, the model leans toward **{layer1_top}**. "
-            f"After adding symptoms and cervical mucus, Layer 2 leans toward **{layer2_top}**. "
-            f"The final fused prediction is **{final_top}**."
-        )
-    else:
-        st.write(
-            f"No symptoms or mucus were added, so the final prediction stays based on period history: **{final_top}**."
-        )
+        st.subheader("Layer 2 — Daily status")
+        x, y, z = st.columns(3)
+        with x:
+            st.metric("Fertility status", result["layer2"]["fertility_status"])
+        with y:
+            st.metric("Symptom phase", result["layer2"]["top_phase"])
+        with z:
+            st.metric("Signal confidence", result["layer2"]["signal_confidence"])
+
+        st.write("**Why:**")
+        for line in result["layer2"]["explanations"]:
+            st.write(f"- {line}")
+
+    if result["layer3"] is not None:
+        st.subheader("Layer 3 — Timing interpretation")
+        st.metric("Timing status", result["layer3"]["timing_status"])
+        st.write(result["layer3"]["timing_note"])
 
     st.subheader("Final phase probabilities")
     final_probs = result["final_phase_probs"]
@@ -195,13 +199,8 @@ if run:
     }
     st.dataframe(prob_df, use_container_width=True)
 
-    st.subheader("Layer details")
-    with st.expander("Layer 1 output"):
-        st.json(result["layer1"])
-
-    if result["layer2"] is not None:
-        with st.expander("Layer 2 output"):
-            st.json(result["layer2"])
-
     st.subheader("Recommendations")
-    st.json(get_recommendations(final_top))
+    st.json(get_recommendations(result["final_phase"]))
+
+    with st.expander("Raw outputs"):
+        st.json(result)
