@@ -45,10 +45,8 @@ def get_fused_output(
 ) -> Dict[str, object]:
     symptoms = symptoms or []
 
-    # Layer 1: history-based timing baseline
     layer1 = get_layer1_output(period_starts, today=today)
 
-    # If no symptom/mucus input, use Layer 1 only
     if not has_symptom_input(symptoms, cervical_mucus, appetite, exerciselevel):
         final_phase_probs = layer1["phase_probs"]
         final_phase = max(final_phase_probs, key=final_phase_probs.get)
@@ -62,7 +60,6 @@ def get_fused_output(
             "final_phase": final_phase,
         }
 
-    # Layer 2: trained symptom model
     layer2 = get_layer2_output(
         symptoms=symptoms,
         cervical_mucus=cervical_mucus,
@@ -70,16 +67,10 @@ def get_fused_output(
         exerciselevel=exerciselevel,
     )
 
-    # Fusion: Layer 1 + Layer 2 phase probabilities
     fused_probs = fuse_phase_probs(layer1["phase_probs"], layer2["phase_probs"])
     final_phase = max(fused_probs, key=fused_probs.get)
 
-    # Layer 3: symptom-informed timing / ovulation layer
-    layer3 = get_layer3_output(
-        layer1=layer1,
-        layer2=layer2,
-        cervical_mucus=cervical_mucus,
-    )
+    layer3 = get_layer3_output(layer1=layer1, layer2=layer2)
 
     return {
         "mode": "fused",
