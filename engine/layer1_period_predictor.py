@@ -52,21 +52,78 @@ def phase_probs_from_cycle_day(cycle_day: Optional[int], cycle_length: Optional[
     return normalize_probs(probs)
 
 
+def get_regularity_status(cycle_lengths: List[int]) -> str:
+    if len(cycle_lengths) < 3:
+        return "limited_history"
+
+    mean_len = sum(cycle_lengths) / len(cycle_lengths)
+    variance = sum((x - mean_len) ** 2 for x in cycle_lengths) / len(cycle_lengths)
+    std = variance ** 0.5
+
+    if std <= 2:
+        return "regular"
+    if std <= 5:
+        return "some_variation"
+    return "irregular"
+
+
+def get_forecast_confidence(cycle_lengths: List[int]) -> str:
+    if len(cycle_lengths) < 3:
+        return "low"
+
+    mean_len = sum(cycle_lengths) / len(cycle_lengths)
+    variance = sum((x - mean_len) ** 2 for x in cycle_lengths) / len(cycle_lengths)
+    std = variance ** 0.5
+
+    if std <= 2:
+        return "high"
+    if std <= 5:
+        return "medium"
+    return "low"
+
+
 def get_layer1_output(period_starts: List[str], today: Optional[str] = None) -> Dict[str, object]:
     cycle_lengths = compute_cycle_lengths(period_starts)
     avg_cycle_length = weighted_recent_cycle_length(cycle_lengths)
     cycle_day = estimate_cycle_day(period_starts, today=today)
 
+    predicted_next_period = None
+    next_period_window = None
+    ovulation_day = None
+    possible_ovulation_date = None
+    fertile_window = None
+
     if period_starts and avg_cycle_length is not None:
         latest = max(parse_date(d) for d in period_starts)
-        predicted_next_period = (latest + timedelta(days=round(avg_cycle_length))).strftime("%Y-%m-%d")
-    else:
-        predicted_next_period = None
+        predicted_next_period_dt = latest + timedelta(days=round(avg_cycle_length))
+        predicted_next_period = predicted_next_period_dt.strftime("%Y-%m-%d")
+
+        confidence = get_forecast_confidence(cycle_lengths)
+        window_size = 2 if confidence == "high" else 4 if confidence == "medium" else 6
+        next_period_window = {
+            "start": (predicted_next_period_dt - timedelta(days=window_size)).strftime("%Y-%m-%d"),
+            "end": (predicted_next_period_dt + timedelta(days=window_size)).strftime("%Y-%m-%d"),
+        }
+
+        ovulation_day = round(avg_cycle_length - 14)
+        possible_ovulation_dt = latest + timedelta(days=ovulation_day - 1)
+        possible_ovulation_date = possible_ovulation_dt.strftime("%Y-%m-%d")
+
+        fertile_window = {
+            "start": (possible_ovulation_dt - timedelta(days=5)).strftime("%Y-%m-%d"),
+            "end": (possible_ovulation_dt + timedelta(days=1)).strftime("%Y-%m-%d"),
+        }
 
     return {
         "cycle_lengths": cycle_lengths,
         "estimated_cycle_length": avg_cycle_length,
         "cycle_day": cycle_day,
         "predicted_next_period": predicted_next_period,
+        "next_period_window": next_period_window,
+        "possible_ovulation_day": ovulation_day,
+        "possible_ovulation_date": possible_ovulation_date,
+        "fertile_window": fertile_window,
+        "regularity_status": get_regularity_status(cycle_lengths),
+        "forecast_confidence": get_forecast_confidence(cycle_lengths),
         "phase_probs": phase_probs_from_cycle_day(cycle_day, avg_cycle_length),
     }
