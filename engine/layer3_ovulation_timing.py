@@ -1,95 +1,74 @@
-from datetime import datetime, timedelta
 from typing import Dict
 
-from .utils import parse_date
+
+def get_timing_status(layer1: Dict, layer2: Dict) -> str:
+    layer1_phase = max(layer1["phase_probs"], key=layer1["phase_probs"].get)
+    layer2_phase = layer2["top_phase"]
+
+    if layer1_phase == layer2_phase:
+        return "On track"
+
+    nearby_pairs = {
+        ("Follicular", "Fertility"),
+        ("Fertility", "Follicular"),
+        ("Fertility", "Luteal"),
+        ("Luteal", "Fertility"),
+        ("Luteal", "Menstrual"),
+        ("Menstrual", "Luteal"),
+        ("Menstrual", "Follicular"),
+        ("Follicular", "Menstrual"),
+    }
+
+    if (layer1_phase, layer2_phase) in nearby_pairs:
+        if layer1_phase == "Luteal" and layer2_phase in {"Follicular", "Fertility"}:
+            return "Possibly later than expected"
+        if layer1_phase == "Follicular" and layer2_phase in {"Fertility", "Luteal"}:
+            return "Possibly earlier than expected"
+        if layer1_phase == "Fertility" and layer2_phase == "Luteal":
+            return "Possibly earlier than expected"
+        if layer1_phase == "Fertility" and layer2_phase == "Follicular":
+            return "Possibly later than expected"
+        if layer1_phase == "Luteal" and layer2_phase == "Menstrual":
+            return "Possibly earlier than expected"
+        if layer1_phase == "Menstrual" and layer2_phase == "Follicular":
+            return "On track"
+
+    return "Timing uncertain this cycle"
 
 
-def _clamp(value: float, low: float, high: float) -> float:
-    return max(low, min(high, value))
+def build_timing_note(layer1: Dict, layer2: Dict, timing_status: str) -> str:
+    layer1_phase = max(layer1["phase_probs"], key=layer1["phase_probs"].get)
+    layer2_phase = layer2["top_phase"]
+    fertility_status = layer2["fertility_status"]
 
+    if timing_status == "On track":
+        return f"History and body signals both support a {layer2_phase.lower()} pattern today."
 
-def _confidence_bucket(fertility_prob: float, shift_abs: float) -> str:
-    if fertility_prob >= 0.65 and shift_abs <= 4:
-        return "high"
-    if fertility_prob >= 0.45:
-        return "moderate"
-    return "low"
+    if timing_status == "Possibly earlier than expected":
+        return (
+            f"History suggests {layer1_phase.lower()}, but body signals look more {layer2_phase.lower()}. "
+            f"This cycle may be moving a little earlier than usual."
+        )
 
+    if timing_status == "Possibly later than expected":
+        return (
+            f"History suggests {layer1_phase.lower()}, but body signals look more {layer2_phase.lower()}. "
+            f"This cycle may be running a little later than expected."
+        )
 
-def _consistency_label(shift_abs: float) -> str:
-    if shift_abs <= 2:
-        return "aligned"
-    if shift_abs <= 6:
-        return "mild_shift"
-    return "strong_contradiction"
-
-
-def get_layer3_output(layer1: Dict, layer2: Dict, cervical_mucus: str = "unknown") -> Dict:
-    cycle_length = layer1.get("estimated_cycle_length")
-    cycle_day = layer1.get("cycle_day")
-    baseline_next_period = layer1.get("predicted_next_period")
-
-    if cycle_length is None or cycle_day is None or baseline_next_period is None:
-        return {
-            "baseline_ovulation_day": None,
-            "expected_symptom_day": None,
-            "shift_days": None,
-            "adjusted_cycle_day": None,
-            "adjusted_ovulation_date": None,
-            "fertile_window_start": None,
-            "fertile_window_end": None,
-            "adjusted_next_period_date": baseline_next_period,
-            "consistency": "unknown",
-            "timing_confidence": "low",
-        }
-
-    probs = layer2["phase_probs"]
-
-    L = float(cycle_length)
-    baseline_cycle_day = float(cycle_day)
-    ovulation_anchor = max(round(L - 14), 1)
-    menstrual_anchor = 3
-    follicular_anchor = max(round((6 + ovulation_anchor) / 2), 6)
-    luteal_anchor = min(round((ovulation_anchor + L) / 2), round(L))
-
-    expected_symptom_day = (
-        probs.get("Menstrual", 0.0) * menstrual_anchor +
-        probs.get("Follicular", 0.0) * follicular_anchor +
-        probs.get("Fertility", 0.0) * ovulation_anchor +
-        probs.get("Luteal", 0.0) * luteal_anchor
+    return (
+        f"History suggests {layer1_phase.lower()}, while body signals lean {layer2_phase.lower()} "
+        f"({fertility_status}). This cycle looks less consistent than usual."
     )
 
-    shift_days = expected_symptom_day - baseline_cycle_day
 
-    adjustment_strength = 0.35
-    fertility_prob = probs.get("Fertility", 0.0)
-
-    if fertility_prob >= 0.60:
-        adjustment_strength += 0.15
-    if (cervical_mucus or "").lower() in {"watery", "eggwhite"}:
-        adjustment_strength += 0.15
-
-    adjusted_cycle_day = baseline_cycle_day + adjustment_strength * shift_days
-    adjusted_cycle_day = _clamp(adjusted_cycle_day, 1, L)
-
-    today = datetime.today().date()
-    adjusted_days_until_ovulation = ovulation_anchor - adjusted_cycle_day
-    adjusted_days_until_next_period = L - adjusted_cycle_day
-
-    adjusted_ovulation_date = today + timedelta(days=round(adjusted_days_until_ovulation))
-    fertile_window_start = adjusted_ovulation_date - timedelta(days=2)
-    fertile_window_end = adjusted_ovulation_date + timedelta(days=1)
-    adjusted_next_period_date = today + timedelta(days=round(adjusted_days_until_next_period))
+def get_layer3_output(layer1: Dict, layer2: Dict) -> Dict:
+    timing_status = get_timing_status(layer1, layer2)
+    timing_note = build_timing_note(layer1, layer2, timing_status)
 
     return {
-        "baseline_ovulation_day": ovulation_anchor,
-        "expected_symptom_day": round(expected_symptom_day, 2),
-        "shift_days": round(shift_days, 2),
-        "adjusted_cycle_day": round(adjusted_cycle_day, 2),
-        "adjusted_ovulation_date": adjusted_ovulation_date.isoformat(),
-        "fertile_window_start": fertile_window_start.isoformat(),
-        "fertile_window_end": fertile_window_end.isoformat(),
-        "adjusted_next_period_date": adjusted_next_period_date.isoformat(),
-        "consistency": _consistency_label(abs(shift_days)),
-        "timing_confidence": _confidence_bucket(fertility_prob, abs(shift_days)),
+        "timing_status": timing_status,
+        "timing_note": timing_note,
+        "history_phase": max(layer1["phase_probs"], key=layer1["phase_probs"].get),
+        "symptom_phase": layer2["top_phase"],
     }
