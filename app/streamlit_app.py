@@ -214,91 +214,71 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-tab1, tab2 = st.tabs(["Dashboard", "Inputs"])
+render_section_title("Period history", "Add past periods so the forecast engine can estimate timing.")
 
-with tab2:
-    render_section_title("Period history", "Add past periods so the forecast engine can estimate timing.")
+col_add, col_remove = st.columns(2)
+with col_add:
+    if st.button("Add another period"):
+        st.session_state.period_count += 1
+with col_remove:
+    if st.button("Remove last period") and st.session_state.period_count > 1:
+        st.session_state.period_count -= 1
 
-    col_add, col_remove = st.columns(2)
-    with col_add:
-        if st.button("Add another period"):
-            st.session_state.period_count += 1
-    with col_remove:
-        if st.button("Remove last period") and st.session_state.period_count > 1:
-            st.session_state.period_count -= 1
+period_rows = []
+for i in range(st.session_state.period_count):
+    st.markdown(f"**Period {i + 1}**")
+    c1, c2 = st.columns(2)
 
-    period_rows = []
-    for i in range(st.session_state.period_count):
-        st.markdown(f"**Period {i + 1}**")
-        c1, c2 = st.columns(2)
+    default_start = None
+    default_end = None
+    if i < len(st.session_state.period_defaults):
+        default_start = st.session_state.period_defaults[i]["start"]
+        default_end = st.session_state.period_defaults[i]["end"]
 
-        default_start = None
-        default_end = None
-        if i < len(st.session_state.period_defaults):
-            default_start = st.session_state.period_defaults[i]["start"]
-            default_end = st.session_state.period_defaults[i]["end"]
+    with c1:
+        start_date = st.date_input(
+            f"Start date #{i + 1}",
+            value=default_start if default_start else date.today(),
+            key=f"start_{i}",
+        )
+    with c2:
+        end_date = st.date_input(
+            f"End date #{i + 1}",
+            value=default_end if default_end else start_date,
+            key=f"end_{i}",
+        )
 
-        with c1:
-            start_date = st.date_input(
-                f"Start date #{i + 1}",
-                value=default_start if default_start else date.today(),
-                key=f"start_{i}",
-            )
-        with c2:
-            end_date = st.date_input(
-                f"End date #{i + 1}",
-                value=default_end if default_end else start_date,
-                key=f"end_{i}",
-            )
+    period_rows.append({"start": start_date, "end": end_date})
 
-        period_rows.append({"start": start_date, "end": end_date})
+render_section_title("Symptoms today", "Choose how strong each symptom feels today.")
+symptom_state = {}
+s1, s2 = st.columns(2)
+symptom_items = list(SYMPTOM_LABELS.items())
 
-    render_section_title("Symptoms today", "Choose the severity for each symptom.")
-    symptom_state = {}
-    s1, s2 = st.columns(2)
-    symptom_items = list(SYMPTOM_LABELS.items())
+for idx, (key, label) in enumerate(symptom_items):
+    target_col = s1 if idx % 2 == 0 else s2
+    with target_col:
+        symptom_state[key] = st.selectbox(
+            label,
+            SEVERITY_OPTIONS,
+            index=0,
+            key=f"sym_{key}",
+        )
 
-    for idx, (key, label) in enumerate(symptom_items):
-        target_col = s1 if idx % 2 == 0 else s2
-        with target_col:
-            symptom_state[key] = st.selectbox(
-                label,
-                SEVERITY_OPTIONS,
-                index=0,
-                key=f"sym_{key}",
-            )
+render_section_title("Cervical mucus", "This is one of the strongest clues for fertile timing.")
+cervical_mucus = st.selectbox(
+    "Select cervical mucus type",
+    MUCUS_OPTIONS,
+    index=MUCUS_OPTIONS.index("unknown") if "unknown" in MUCUS_OPTIONS else 0,
+)
 
-    render_section_title("Cervical mucus", "This is one of the strongest clues for fertile timing.")
-    cervical_mucus = st.selectbox(
-        "Select cervical mucus type",
-        MUCUS_OPTIONS,
-        index=MUCUS_OPTIONS.index("unknown") if "unknown" in MUCUS_OPTIONS else 0,
-    )
+run = st.button("Run prediction", type="primary")
 
-    run = st.button("Run prediction", type="primary")
-
-with tab1:
-    run = st.session_state.get("last_run", False) if "last_run" in st.session_state else False
-    period_rows = st.session_state.get("last_period_rows", [])
-    symptom_state = st.session_state.get("last_symptom_state", {})
-    cervical_mucus = st.session_state.get("last_cervical_mucus", "unknown")
-
-# Handle run from inputs tab
-if 'run' in locals() and run:
+if run:
     invalid_rows = [i + 1 for i, row in enumerate(period_rows) if row["end"] < row["start"]]
     if invalid_rows:
         st.error(f"End date cannot be before start date for period(s): {', '.join(map(str, invalid_rows))}")
         st.stop()
-
-    st.session_state["last_run"] = True
-    st.session_state["last_period_rows"] = period_rows
-    st.session_state["last_symptom_state"] = symptom_state
-    st.session_state["last_cervical_mucus"] = cervical_mucus
-
-if st.session_state.get("last_run", False):
-    period_rows = st.session_state["last_period_rows"]
-    symptom_state = st.session_state["last_symptom_state"]
-    cervical_mucus = st.session_state["last_cervical_mucus"]
 
     period_starts = [row["start"].strftime("%Y-%m-%d") for row in period_rows]
     selected_symptoms = parse_selected_symptoms(symptom_state)
@@ -312,132 +292,131 @@ if st.session_state.get("last_run", False):
     bleed_lengths = compute_bleed_lengths(period_rows)
     avg_bleed_length = safe_avg(bleed_lengths)
 
-    with tab1:
-        left, right = st.columns([1.1, 1.3])
+    st.divider()
 
-        with left:
+    left, right = st.columns([1.1, 1.3])
+
+    with left:
+        st.markdown(
+            render_circle(
+                phase=result["final_phase"],
+                cycle_day=result["layer1"].get("cycle_day"),
+                fertility_status=result["layer2"]["fertility_status"] if result["layer2"] else "Need More Data",
+            ),
+            unsafe_allow_html=True,
+        )
+
+    with right:
+        render_section_title("Today at a glance", "Your forecast, current phase, and daily fertility-style status.")
+        c1, c2 = st.columns(2)
+        with c1:
             st.markdown(
-                render_circle(
-                    phase=result["final_phase"],
-                    cycle_day=result["layer1"].get("cycle_day"),
-                    fertility_status=result["layer2"]["fertility_status"] if result["layer2"] else "Need More Data",
+                render_card(
+                    "Expected next period",
+                    result["layer1"].get("predicted_next_period") or "N/A",
+                    "Based on cycle history",
+                ),
+                unsafe_allow_html=True,
+            )
+        with c2:
+            st.markdown(
+                render_card(
+                    "Forecast confidence",
+                    result["layer1"].get("forecast_confidence", "N/A").title(),
+                    f"Regularity: {result['layer1'].get('regularity_status', 'N/A').replace('_', ' ')}",
                 ),
                 unsafe_allow_html=True,
             )
 
-        with right:
-            render_section_title("Today at a glance", "Your forecast, current phase, and daily fertility-style status.")
-            c1, c2 = st.columns(2)
-            with c1:
-                st.markdown(
-                    render_card(
-                        "Expected next period",
-                        result["layer1"].get("predicted_next_period") or "N/A",
-                        "Based on cycle history",
-                    ),
-                    unsafe_allow_html=True,
-                )
-            with c2:
-                st.markdown(
-                    render_card(
-                        "Forecast confidence",
-                        result["layer1"].get("forecast_confidence", "N/A").title(),
-                        f"Regularity: {result['layer1'].get('regularity_status', 'N/A').replace('_', ' ')}",
-                    ),
-                    unsafe_allow_html=True,
-                )
+        c3, c4 = st.columns(2)
+        with c3:
+            st.markdown(
+                render_card(
+                    "Possible ovulation date",
+                    result["layer1"].get("possible_ovulation_date") or "N/A",
+                    "Forecast estimate",
+                ),
+                unsafe_allow_html=True,
+            )
+        with c4:
+            fertility_status = result["layer2"]["fertility_status"] if result["layer2"] else "Need More Data"
+            st.markdown(
+                render_card(
+                    "Daily status",
+                    fertility_status,
+                    "Symptom-informed status",
+                ),
+                unsafe_allow_html=True,
+            )
 
-            c3, c4 = st.columns(2)
-            with c3:
-                st.markdown(
-                    render_card(
-                        "Possible ovulation date",
-                        result["layer1"].get("possible_ovulation_date") or "N/A",
-                        "Forecast estimate",
-                    ),
-                    unsafe_allow_html=True,
-                )
-            with c4:
-                fertility_status = result["layer2"]["fertility_status"] if result["layer2"] else "Need More Data"
-                st.markdown(
-                    render_card(
-                        "Daily status",
-                        fertility_status,
-                        "Symptom-informed status",
-                    ),
-                    unsafe_allow_html=True,
-                )
+    render_section_title("Forecast & daily interpretation")
 
-        render_section_title("Forecast & daily interpretation")
+    a, b, c = st.columns(3)
+    with a:
+        st.metric("Cycle day", result["layer1"].get("cycle_day"))
+        st.metric("Estimated cycle length", result["layer1"].get("estimated_cycle_length"))
+        st.metric("Average bleed length", avg_bleed_length if avg_bleed_length is not None else "N/A")
 
-        a, b, c = st.columns(3)
-        with a:
-            st.metric("Cycle day", result["layer1"].get("cycle_day"))
-            st.metric("Estimated cycle length", result["layer1"].get("estimated_cycle_length"))
-            st.metric("Average bleed length", avg_bleed_length if avg_bleed_length is not None else "N/A")
+    with b:
+        st.markdown("**Fertile window**")
+        fw = result["layer1"].get("fertile_window")
+        if fw:
+            st.success(f"{fw['start']} → {fw['end']}")
+        else:
+            st.info("Not enough history yet")
 
-        with b:
-            st.markdown("**Fertile window**")
-            fw = result["layer1"].get("fertile_window")
-            if fw:
-                st.success(f"{fw['start']} → {fw['end']}")
-            else:
-                st.info("Not enough history yet")
+        st.markdown("**Next period window**")
+        npw = result["layer1"].get("next_period_window")
+        if npw:
+            st.warning(f"{npw['start']} → {npw['end']}")
+        else:
+            st.info("Not enough history yet")
 
-            st.markdown("**Next period window**")
-            npw = result["layer1"].get("next_period_window")
-            if npw:
-                st.warning(f"{npw['start']} → {npw['end']}")
-            else:
-                st.info("Not enough history yet")
-
-        with c:
-            if result["layer2"] is not None:
-                st.markdown("**Layer 2 status**")
-                status_color = get_status_color(result["layer2"]["fertility_status"])
-                st.markdown(
-                    render_badge(result["layer2"]["fertility_status"], status_color),
-                    unsafe_allow_html=True,
-                )
-                st.write("")
-                st.write(f"**Symptom phase:** {result['layer2']['top_phase']}")
-                st.write(f"**Signal confidence:** {result['layer2']['signal_confidence'].title()}")
-
-            if result["layer3"] is not None:
-                st.write("")
-                st.markdown("**Timing interpretation**")
-                st.info(result["layer3"]["timing_status"])
-                st.caption(result["layer3"]["timing_note"])
-
+    with c:
         if result["layer2"] is not None:
-            render_section_title("Why the app said this")
-            for line in result["layer2"]["explanations"]:
-                st.write(f"- {line}")
-
-        render_section_title("Phase probabilities")
-        probs = result["final_phase_probs"]
-        for phase, value in probs.items():
-            st.write(f"**{phase}**")
-            st.progress(float(value))
-            st.caption(f"{round(value * 100, 1)}%")
-
-        render_section_title("Recommendations")
-        recs = get_recommendations(result["final_phase"])
-        r1, r2 = st.columns(2)
-        with r1:
+            st.markdown("**Layer 2 status**")
+            status_color = get_status_color(result["layer2"]["fertility_status"])
             st.markdown(
-                render_card("Workout", recs.get("workout", ""), "Based on your current likely phase"),
+                render_badge(result["layer2"]["fertility_status"], status_color),
                 unsafe_allow_html=True,
             )
-        with r2:
-            st.markdown(
-                render_card("Nutrition", recs.get("nutrition", ""), "Based on your current likely phase"),
-                unsafe_allow_html=True,
-            )
+            st.write("")
+            st.write(f"**Symptom phase:** {result['layer2']['top_phase']}")
+            st.write(f"**Signal confidence:** {result['layer2']['signal_confidence'].title()}")
 
-        with st.expander("Raw outputs"):
-            st.json(result)
+        if result["layer3"] is not None:
+            st.write("")
+            st.markdown("**Timing interpretation**")
+            st.info(result["layer3"]["timing_status"])
+            st.caption(result["layer3"]["timing_note"])
 
+    if result["layer2"] is not None:
+        render_section_title("Why the app said this")
+        for line in result["layer2"]["explanations"]:
+            st.write(f"- {line}")
+
+    render_section_title("Phase probabilities")
+    probs = result["final_phase_probs"]
+    for phase, value in probs.items():
+        st.write(f"**{phase}**")
+        st.progress(float(value))
+        st.caption(f"{round(value * 100, 1)}%")
+
+    render_section_title("Recommendations")
+    recs = get_recommendations(result["final_phase"])
+    r1, r2 = st.columns(2)
+    with r1:
+        st.markdown(
+            render_card("Workout", recs.get("workout", ""), "Based on your current likely phase"),
+            unsafe_allow_html=True,
+        )
+    with r2:
+        st.markdown(
+            render_card("Nutrition", recs.get("nutrition", ""), "Based on your current likely phase"),
+            unsafe_allow_html=True,
+        )
+
+    with st.expander("Raw outputs"):
+        st.json(result)
 else:
-    with tab1:
-        st.info("Add your period history and symptoms in the Inputs tab, then run prediction.")
+    st.info("Fill in your period history and symptoms above, then click Run prediction.")
