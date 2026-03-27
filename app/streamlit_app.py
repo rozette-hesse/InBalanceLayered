@@ -85,7 +85,29 @@ def badge(text: str, color: str) -> str:
     """
 
 
-def hero_card(cycle_day, phase, daily_status, next_period, timing_note) -> str:
+def render_card(title: str, value: str, subtitle: str = "") -> str:
+    return f"""
+    <div style="
+        background:white;
+        border:1px solid #e5e7eb;
+        border-radius:20px;
+        padding:20px 18px;
+        box-shadow:0 4px 18px rgba(15,23,42,0.05);
+        min-height:145px;
+        display:flex;
+        flex-direction:column;
+        justify-content:space-between;
+        overflow-wrap:anywhere;
+        word-break:break-word;
+    ">
+        <div style="font-size:0.95rem;color:#6b7280;margin-bottom:10px;">{title}</div>
+        <div style="font-size:1.25rem;font-weight:700;color:#111827;line-height:1.35;">{value}</div>
+        <div style="font-size:0.9rem;color:#6b7280;margin-top:10px;">{subtitle}</div>
+    </div>
+    """
+
+
+def hero_card(cycle_day, phase, daily_status, next_period, next_period_window_text, timing_note) -> str:
     p_color = phase_color(phase)
     s_color = status_color(daily_status)
     return f"""
@@ -101,10 +123,15 @@ def hero_card(cycle_day, phase, daily_status, next_period, timing_note) -> str:
         <div style="font-size:42px;font-weight:800;color:#111827;line-height:1;">Cycle day {cycle_day}</div>
         <div style="font-size:26px;font-weight:700;color:{p_color};margin-top:10px;">{phase}</div>
         <div style="margin-top:14px;">{badge(daily_status, s_color)}</div>
+
         <div style="margin-top:22px;font-size:18px;color:#111827;">
             <strong>Next period:</strong> {next_period if next_period else "N/A"}
         </div>
-        <div style="margin-top:8px;font-size:16px;color:#6b7280;">
+        <div style="margin-top:6px;font-size:15px;color:#6b7280;">
+            <strong>Expected window:</strong> {next_period_window_text if next_period_window_text else "N/A"}
+        </div>
+
+        <div style="margin-top:10px;font-size:16px;color:#6b7280;">
             <strong>Timing:</strong> {timing_note}
         </div>
     </div>
@@ -119,7 +146,6 @@ if "period_defaults" not in st.session_state:
         {"start": date(2025, 11, 1), "end": date(2025, 11, 5)},
         {"start": date(2025, 12, 17), "end": date(2025, 12, 22)},
         {"start": date(2026, 1, 25), "end": date(2026, 1, 30)},
-    
     ]
 
 st.markdown(
@@ -215,12 +241,19 @@ if run:
     daily_status = result["layer2"]["fertility_status"] if result["layer2"] else "Need More Data"
     timing_note = result["layer3"]["timing_status"] if result["layer3"] else "Based on cycle history only"
 
+    next_period_window = result["layer1"].get("next_period_window")
+    next_period_window_text = (
+        f"{next_period_window['start']} to {next_period_window['end']}"
+        if next_period_window else "N/A"
+    )
+
     st.markdown(
         hero_card(
             cycle_day=cycle_day,
             phase=phase,
             daily_status=daily_status,
             next_period=next_period,
+            next_period_window_text=next_period_window_text,
             timing_note=timing_note,
         ),
         unsafe_allow_html=True,
@@ -229,18 +262,39 @@ if run:
     ovulation_date = result["layer1"].get("possible_ovulation_date") or "N/A"
     fertile_window = result["layer1"].get("fertile_window")
     fertile_window_text = (
-        f"{fertile_window['start']} → {fertile_window['end']}"
+        f"{fertile_window['start']} to {fertile_window['end']}"
         if fertile_window else "N/A"
     )
     forecast_confidence = result["layer1"].get("forecast_confidence", "N/A").title()
 
-    x, y, z = st.columns(3)
+    x, y, z = st.columns([1.1, 1.4, 1.0])
     with x:
-        st.metric("Estimated ovulation", ovulation_date)
+        st.markdown(
+            render_card(
+                "Estimated ovulation",
+                ovulation_date,
+                "Forecast estimate",
+            ),
+            unsafe_allow_html=True,
+        )
     with y:
-        st.metric("Fertile window", fertile_window_text)
+        st.markdown(
+            render_card(
+                "Fertile window",
+                fertile_window_text,
+                "Best estimate from cycle history",
+            ),
+            unsafe_allow_html=True,
+        )
     with z:
-        st.metric("Forecast confidence", forecast_confidence)
+        st.markdown(
+            render_card(
+                "Forecast confidence",
+                forecast_confidence,
+                "How stable your cycle timing looks",
+            ),
+            unsafe_allow_html=True,
+        )
 
     explain = ""
     if result["layer3"] is not None:
