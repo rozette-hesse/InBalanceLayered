@@ -82,10 +82,10 @@ def get_fertility_status(
     fertility_prob = phase_probs.get("Fertility", 0.0)
     mucus = (cervical_mucus or "unknown").lower()
 
-    if mucus in {"watery", "eggwhite"} and fertility_prob >= 0.45:
+    if mucus in {"watery", "eggwhite"} and fertility_prob >= 0.40:
         return "Red Day"
 
-    if fertility_prob >= 0.55:
+    if fertility_prob >= 0.60:
         return "Red Day"
 
     if fertility_prob >= 0.35 or mucus in {"creamy", "watery"}:
@@ -99,20 +99,30 @@ def get_fertility_status(
 
 def get_signal_confidence(phase_probs: Dict[str, float], symptom_count: int, cervical_mucus: str) -> str:
     sorted_probs = sorted(phase_probs.values(), reverse=True)
-    gap = sorted_probs[0] - sorted_probs[1] if len(sorted_probs) > 1 else sorted_probs[0]
+    top_prob = sorted_probs[0] if sorted_probs else 0.0
+    second_prob = sorted_probs[1] if len(sorted_probs) > 1 else 0.0
+    gap = top_prob - second_prob
     mucus = (cervical_mucus or "unknown").lower()
 
-    if gap >= 0.35 and (symptom_count >= 2 or mucus in {"watery", "eggwhite"}):
+    if gap >= 0.30 and (symptom_count >= 2 or mucus in {"watery", "eggwhite"}):
         return "high"
-    if gap >= 0.18 and (symptom_count >= 1 or mucus != "unknown"):
+    if gap >= 0.15 and (symptom_count >= 1 or mucus != "unknown"):
         return "medium"
     return "low"
 
 
-def build_explanations(symptoms: List[str], cervical_mucus: str, top_phase: str) -> List[str]:
+def build_explanations(
+    symptoms: List[str],
+    cervical_mucus: str,
+    top_phase: str,
+    bleeding_today: bool = False,
+) -> List[str]:
     explanations = []
     symptom_set = set(symptoms or [])
     mucus = (cervical_mucus or "unknown").lower()
+
+    if bleeding_today:
+        explanations.append("Bleeding today strongly supports a menstrual phase.")
 
     if mucus in {"watery", "eggwhite"}:
         explanations.append("Fertile-type cervical mucus increased fertility likelihood.")
@@ -121,14 +131,14 @@ def build_explanations(symptoms: List[str], cervical_mucus: str, top_phase: str)
     elif mucus in {"dry", "sticky"}:
         explanations.append("Dry or sticky mucus lowered fertile-window likelihood.")
 
-    if top_phase == "Menstrual" and {"cramps", "fatigue"} & symptom_set:
-        explanations.append("Cramps and fatigue supported a menstrual-like pattern.")
+    if top_phase == "Menstrual" and {"cramps", "bloating", "fatigue"} & symptom_set:
+        explanations.append("A cluster of period-like symptoms supported a menstrual-like pattern.")
 
     if top_phase == "Luteal" and {"sorebreasts", "foodcravings", "bloating"} & symptom_set:
         explanations.append("Breast tenderness, cravings, or bloating supported a luteal-like pattern.")
 
-    if top_phase == "Follicular" and len(symptom_set) <= 2 and mucus in {"unknown", "sticky", "creamy"}:
-        explanations.append("Lower symptom burden fit better with a follicular-like pattern.")
+    if top_phase == "Follicular" and len(symptom_set) <= 2 and mucus in {"unknown", "sticky", "creamy", "dry"}:
+        explanations.append("Lower or less specific symptom burden fit better with a follicular-like pattern.")
 
     if top_phase == "Fertility" and mucus in {"watery", "eggwhite"}:
         explanations.append("Body signals matched a more fertile phase pattern.")
@@ -144,6 +154,7 @@ def get_layer2_output(
     cervical_mucus: str,
     appetite: int = 0,
     exerciselevel: int = 0,
+    bleeding_today: bool = False,
 ) -> Dict[str, object]:
     model = joblib.load(ARTIFACTS_DIR / "layer2a_clf_mucus.joblib")
     X = build_engineered_features(
@@ -157,8 +168,20 @@ def get_layer2_output(
     classes = list(model.classes_)
 
     phase_probs = {phase: float(prob) for phase, prob in zip(classes, probs)}
+
+    # bleeding should strongly push menstrual, but only when user reports it
+    if bleeding_today:
+        phase_probs["Menstrual"] += 0.45
+        total = sum(phase_probs.values())
+        phase_probs = {k: v / total for k, v in phase_probs.items()}
+
     top_phase = max(phase_probs, key=phase_probs.get)
     symptom_count = len(symptoms or [])
+
+    sorted_items = sorted(phase_probs.items(), key=lambda x: x[1], reverse=True)
+    top_prob = sorted_items[0][1]
+    second_prob = sorted_items[1][1] if len(sorted_items) > 1 else 0.0
+    prob_gap = top_prob - second_prob
 
     fertility_status = get_fertility_status(
         phase_probs=phase_probs,
@@ -176,11 +199,15 @@ def get_layer2_output(
         symptoms=symptoms,
         cervical_mucus=cervical_mucus,
         top_phase=top_phase,
+        bleeding_today=bleeding_today,
     )
 
     return {
         "phase_probs": phase_probs,
         "top_phase": top_phase,
+        "top_prob": float(top_prob),
+        "second_prob": float(second_prob),
+        "prob_gap": float(prob_gap),
         "fertility_status": fertility_status,
         "signal_confidence": signal_confidence,
         "explanations": explanations,
