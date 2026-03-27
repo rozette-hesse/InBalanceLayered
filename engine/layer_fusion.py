@@ -27,8 +27,8 @@ def fuse_phase_probs(
 ) -> Dict[str, float]:
     fused = {
         phase: (
-            LAYER1_WEIGHT * layer1_probs.get(phase, 0.0)
-            + LAYER2_WEIGHT * layer2_probs.get(phase, 0.0)
+            LAYER1_WEIGHT * layer1_probs.get(phase, 0.2)
+            + LAYER2_WEIGHT * layer2_probs.get(phase, 0.8)
         )
         for phase in PHASES
     }
