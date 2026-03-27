@@ -116,9 +116,9 @@ if "period_count" not in st.session_state:
 
 if "period_defaults" not in st.session_state:
     st.session_state.period_defaults = [
-        {"start": date(2026, 1, 1), "end": date(2026, 1, 5)},
-        {"start": date(2026, 1, 29), "end": date(2026, 2, 2)},
-        {"start": date(2026, 2, 26), "end": date(2026, 3, 1)},
+        {"start": date(2025, 11, 1), "end": date(2025, 11, 5)},
+        {"start": date(2025, 12, 17), "end": date(2025, 12, 22)},
+        {"start": date(2026, 01, 25), "end": date(2026, 01, 30)},
     ]
 
 st.markdown(
