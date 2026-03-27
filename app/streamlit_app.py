@@ -214,7 +214,8 @@ cervical_mucus = st.selectbox(
     MUCUS_OPTIONS,
     index=MUCUS_OPTIONS.index("unknown") if "unknown" in MUCUS_OPTIONS else 0,
 )
-
+st.subheader("Bleeding")
+bleeding_today = st.checkbox("Bleeding today")
 run = st.button("Run prediction", type="primary")
 
 if run:
@@ -227,10 +228,11 @@ if run:
     selected_symptoms = parse_selected_symptoms(symptom_state)
 
     result = get_fused_output(
-        period_starts=period_starts,
-        symptoms=selected_symptoms,
-        cervical_mucus=cervical_mucus,
-    )
+    period_starts=period_starts,
+    symptoms=selected_symptoms,
+    cervical_mucus=cervical_mucus,
+    bleeding_today=bleeding_today,
+)
 
     bleed_lengths = compute_bleed_lengths(period_rows)
     avg_bleed_length = safe_avg(bleed_lengths)
