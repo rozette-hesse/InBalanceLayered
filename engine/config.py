@@ -27,5 +27,5 @@ ALL_LAYER2_INPUTS = PCA_EXTRA_INPUTS + SUPPORTED_SYMPTOMS
 
 MUCUS_OPTIONS = ["dry", "sticky", "creamy", "eggwhite", "watery", "unknown"]
 
-LAYER1_WEIGHT = 0.2
-LAYER2_WEIGHT = 0.8
+LAYER1_WEIGHT = 0.5
+LAYER2_WEIGHT = 0.5
