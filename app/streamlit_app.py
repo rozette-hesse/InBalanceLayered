@@ -119,6 +119,7 @@ if "period_defaults" not in st.session_state:
         {"start": date(2025, 11, 1), "end": date(2025, 11, 5)},
         {"start": date(2025, 12, 17), "end": date(2025, 12, 22)},
         {"start": date(2026, 1, 25), "end": date(2026, 1, 30)},
+        {"start": date(2026, 3, 11), "end": date(2026, 3, 16)},
     ]
 
 st.markdown(
@@ -205,6 +206,9 @@ if run:
         cervical_mucus=cervical_mucus,
     )
 
+    bleed_lengths = compute_bleed_lengths(period_rows)
+    avg_bleed_length = safe_avg(bleed_lengths)
+
     next_period = result["layer1"].get("predicted_next_period")
     cycle_day = result["layer1"].get("cycle_day")
     phase = result["final_phase"]
@@ -222,6 +226,22 @@ if run:
         unsafe_allow_html=True,
     )
 
+    ovulation_date = result["layer1"].get("possible_ovulation_date") or "N/A"
+    fertile_window = result["layer1"].get("fertile_window")
+    fertile_window_text = (
+        f"{fertile_window['start']} → {fertile_window['end']}"
+        if fertile_window else "N/A"
+    )
+    forecast_confidence = result["layer1"].get("forecast_confidence", "N/A").title()
+
+    x, y, z = st.columns(3)
+    with x:
+        st.metric("Estimated ovulation", ovulation_date)
+    with y:
+        st.metric("Fertile window", fertile_window_text)
+    with z:
+        st.metric("Forecast confidence", forecast_confidence)
+
     explain = ""
     if result["layer3"] is not None:
         explain = result["layer3"]["timing_note"]
@@ -233,16 +253,15 @@ if run:
     st.write(explain)
 
     recs = get_recommendations(phase)
-    x, y = st.columns(2)
-    with x:
-        st.metric("Workout", recs.get("workout", ""))
-    with y:
-        st.metric("Nutrition", recs.get("nutrition", ""))
+    a, b = st.columns(2)
+    with a:
+        st.markdown("**Workout**")
+        st.write(recs.get("workout", ""))
+    with b:
+        st.markdown("**Nutrition**")
+        st.write(recs.get("nutrition", ""))
 
     with st.expander("See more details"):
-        bleed_lengths = compute_bleed_lengths(period_rows)
-        avg_bleed_length = safe_avg(bleed_lengths)
-
         st.write("**Forecast details**")
         st.write("Cycle day:", result["layer1"].get("cycle_day"))
         st.write("Estimated cycle length:", result["layer1"].get("estimated_cycle_length"))
@@ -250,6 +269,7 @@ if run:
         st.write("Possible ovulation date:", result["layer1"].get("possible_ovulation_date"))
         st.write("Fertile window:", result["layer1"].get("fertile_window"))
         st.write("Next period window:", result["layer1"].get("next_period_window"))
+        st.write("Regularity:", result["layer1"].get("regularity_status"))
         st.write("Forecast confidence:", result["layer1"].get("forecast_confidence"))
 
         if result["layer2"] is not None:
