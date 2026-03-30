@@ -24,11 +24,11 @@ SUPPORTED_SYMPTOMS = [
 
 MUCUS_OPTIONS = ["dry", "sticky", "creamy", "eggwhite", "watery", "unknown"]
 
-# Tuned from your notebook
+# Tuned from notebook
 LAYER1_WEIGHT = 0.2
 LAYER2_WEIGHT = 0.8
 
-# New Layer 2 artifacts
+# New artifacts
 LAYER2_PIPELINE_FILE = "layer2_vnext_pipeline.joblib"
 LAYER2_LABEL_ENCODER_FILE = "layer2_vnext_label_encoder.joblib"
 LAYER2_FEATURE_COLUMNS_FILE = "layer2_vnext_feature_columns.joblib"
