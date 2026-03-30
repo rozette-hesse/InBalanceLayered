@@ -140,6 +140,15 @@ def hero_card(cycle_day, phase, daily_status, next_period, next_period_window_te
     """
 
 
+def build_daily_log(symptom_state: dict, cervical_mucus: str) -> dict:
+    return {
+        "symptoms": parse_selected_symptoms(symptom_state),
+        "cervical_mucus": cervical_mucus,
+        "appetite": 0,
+        "exerciselevel": 0,
+    }
+
+
 if "period_count" not in st.session_state:
     st.session_state.period_count = 3
 
@@ -205,12 +214,67 @@ for i in range(st.session_state.period_count):
 
     period_rows.append({"start": start_date, "end": end_date})
 
+# ----------------------------
+# Previous 2 days for Layer 2 memory
+# ----------------------------
+st.subheader("Recent body signals")
+
+use_recent_logs = st.checkbox("Use last 3 days of logs for smarter symptom prediction", value=True)
+
+previous_logs = []
+
+if use_recent_logs:
+    st.caption("Optional: fill the last 2 days before today. Today is entered below separately.")
+
+    # Day -2
+    with st.expander("2 days ago", expanded=False):
+        prev2_symptom_state = {}
+        for key, label in SYMPTOM_LABELS.items():
+            prev2_symptom_state[key] = st.selectbox(
+                f"{label} (2 days ago)",
+                SEVERITY_OPTIONS,
+                index=0,
+                key=f"prev2_sym_{key}",
+            )
+
+        prev2_mucus = st.selectbox(
+            "Cervical mucus (2 days ago)",
+            MUCUS_OPTIONS,
+            index=MUCUS_OPTIONS.index("unknown") if "unknown" in MUCUS_OPTIONS else 0,
+            key="prev2_mucus",
+        )
+
+        previous_logs.append(build_daily_log(prev2_symptom_state, prev2_mucus))
+
+    # Day -1
+    with st.expander("Yesterday", expanded=False):
+        prev1_symptom_state = {}
+        for key, label in SYMPTOM_LABELS.items():
+            prev1_symptom_state[key] = st.selectbox(
+                f"{label} (yesterday)",
+                SEVERITY_OPTIONS,
+                index=0,
+                key=f"prev1_sym_{key}",
+            )
+
+        prev1_mucus = st.selectbox(
+            "Cervical mucus (yesterday)",
+            MUCUS_OPTIONS,
+            index=MUCUS_OPTIONS.index("unknown") if "unknown" in MUCUS_OPTIONS else 0,
+            key="prev1_mucus",
+        )
+
+        previous_logs.append(build_daily_log(prev1_symptom_state, prev1_mucus))
+
+# ----------------------------
+# Today
+# ----------------------------
 st.subheader("Symptoms today")
 symptom_state = {}
 for key, label in SYMPTOM_LABELS.items():
     symptom_state[key] = st.selectbox(label, SEVERITY_OPTIONS, index=0, key=f"sym_{key}")
 
-st.subheader("Cervical mucus")
+st.subheader("Cervical mucus today")
 cervical_mucus = st.selectbox(
     "Select cervical mucus type",
     MUCUS_OPTIONS,
@@ -231,11 +295,14 @@ if run:
     period_starts = [row["start"].strftime("%Y-%m-%d") for row in period_rows]
     selected_symptoms = parse_selected_symptoms(symptom_state)
 
+    recent_daily_logs = previous_logs if use_recent_logs else None
+
     result = get_fused_output(
         period_starts=period_starts,
         symptoms=selected_symptoms,
         cervical_mucus=cervical_mucus,
         period_start_logged=period_start_logged,
+        recent_daily_logs=recent_daily_logs,
     )
 
     bleed_lengths = compute_bleed_lengths(period_rows)
@@ -348,6 +415,8 @@ if run:
         st.write("**Phase probabilities**")
         for phase_name, value in result["final_phase_probs"].items():
             st.write(f"{phase_name}: {round(value * 100, 1)}%")
+
+        st.write("**3-day symptom memory used:**", "Yes" if use_recent_logs else "No")
 
 else:
     st.info("Fill in your period history and today’s symptoms, then click Run prediction.")
