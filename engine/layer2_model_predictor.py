@@ -8,16 +8,10 @@ from .config import (
     ARTIFACTS_DIR,
     LAYER2_FEATURE_COLUMNS_FILE,
     LAYER2_LABEL_ENCODER_FILE,
-    LAYER2_METADATA_FILE,
     LAYER2_PIPELINE_FILE,
     NON_MENSTRUAL_PHASES,
     SUPPORTED_SYMPTOMS,
 )
-
-
-# ------------------------------------------------------------
-# Helpers
-# ------------------------------------------------------------
 
 SYMPTOM_ALIASES = {
     "headache": "headaches",
@@ -38,7 +32,6 @@ SYMPTOM_ALIASES = {
     "indigestion": "indigestion",
     "bloating": "bloating",
 }
-
 
 MUCUS_FERTILITY_MAP = {
     "unknown": 0.0,
@@ -93,12 +86,10 @@ def _build_today_row(
 
     row: Dict[str, object] = {}
 
-    # raw symptom values + logged flags
     for sym in SUPPORTED_SYMPTOMS:
         row[sym] = 1.0 if sym in symptom_set else 0.0
         row[f"{sym}_logged"] = 1
 
-    # grouped features
     pain_cols = ["headaches", "cramps", "sorebreasts"]
     energy_cols = ["fatigue", "sleepissue"]
     mood_cols = ["moodswing", "stress"]
@@ -116,16 +107,13 @@ def _build_today_row(
     add_group("mood", mood_cols)
     add_group("digestive", digestive_cols)
 
-    # completeness
     row["num_symptoms_logged"] = len(SUPPORTED_SYMPTOMS)
     row["symptom_completeness"] = 1.0
 
-    # mucus
     row["mucus_logged"] = 0 if mucus_type == "unknown" else 1
     row["mucus_score_logged"] = 0 if mucus_type == "unknown" else 1
     row["mucus_fertility_score"] = float(MUCUS_FERTILITY_MAP[mucus_type])
 
-    # simple user inputs
     row["appetite"] = _safe_int(appetite, 0)
     row["exerciselevel"] = _safe_int(exerciselevel, 0)
     row["mucus_type"] = mucus_type
@@ -137,16 +125,6 @@ def _build_recent_rows(
     recent_daily_logs: Optional[List[Dict[str, object]]],
     today_row: Dict[str, object],
 ) -> List[Dict[str, object]]:
-    """
-    Expects up to 2 prior daily logs, oldest -> newest.
-    Each prior log can contain:
-      {
-        "symptoms": [...],
-        "cervical_mucus": "creamy",
-        "appetite": 1,
-        "exerciselevel": 2
-      }
-    """
     rows: List[Dict[str, object]] = []
 
     for item in recent_daily_logs or []:
@@ -160,13 +138,10 @@ def _build_recent_rows(
         )
 
     rows.append(today_row)
-    return rows[-3:]  # keep only last 3 total
+    return rows[-3:]
 
 
 def _apply_history_features(last_rows: List[Dict[str, object]], today_row: Dict[str, object]) -> Dict[str, object]:
-    """
-    Recreates the main lag / rolling features expected by the new model.
-    """
     out = dict(today_row)
 
     history_base_cols = [
@@ -226,10 +201,8 @@ def _make_feature_frame(
     final_row = _apply_history_features(last_rows=history_rows, today_row=today_row)
 
     feature_cols = joblib.load(ARTIFACTS_DIR / LAYER2_FEATURE_COLUMNS_FILE)
-
     X = pd.DataFrame([{col: final_row.get(col, np.nan) for col in feature_cols}])
 
-    # fill any missing categoricals the pipeline may expect
     for c in X.columns:
         if X[c].dtype == "object" and X[c].isna().all():
             X[c] = "unknown"
@@ -301,10 +274,6 @@ def _build_explanations(
     return explanations[:3]
 
 
-# ------------------------------------------------------------
-# Public API
-# ------------------------------------------------------------
-
 def get_layer2_output(
     symptoms: Optional[List[str]],
     cervical_mucus: str = "unknown",
@@ -312,14 +281,6 @@ def get_layer2_output(
     exerciselevel: int = 0,
     recent_daily_logs: Optional[List[Dict[str, object]]] = None,
 ) -> Dict[str, object]:
-    """
-    Layer 2 predicts ONLY:
-      - Follicular
-      - Fertility
-      - Luteal
-
-    Menstrual is handled later by app logic when Period Start is logged.
-    """
     pipeline = joblib.load(ARTIFACTS_DIR / LAYER2_PIPELINE_FILE)
     label_encoder = joblib.load(ARTIFACTS_DIR / LAYER2_LABEL_ENCODER_FILE)
 
@@ -337,11 +298,9 @@ def get_layer2_output(
 
     phase_probs = {phase: float(prob) for phase, prob in zip(class_names, probs)}
 
-    # make sure all 3 non-menstrual phases are present
     for phase in NON_MENSTRUAL_PHASES:
         phase_probs.setdefault(phase, 0.0)
 
-    # normalize just in case
     total = sum(phase_probs.values()) or 1.0
     phase_probs = {k: v / total for k, v in phase_probs.items()}
 
