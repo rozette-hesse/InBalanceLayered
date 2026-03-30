@@ -282,29 +282,17 @@ if run:
     x, y, z = st.columns([1.1, 1.4, 1.0])
     with x:
         st.markdown(
-            render_card(
-                "Estimated ovulation",
-                ovulation_date,
-                "Forecast estimate",
-            ),
+            render_card("Estimated ovulation", ovulation_date, "Forecast estimate"),
             unsafe_allow_html=True,
         )
     with y:
         st.markdown(
-            render_card(
-                "Fertile window",
-                fertile_window_text,
-                "Best estimate from cycle history",
-            ),
+            render_card("Fertile window", fertile_window_text, "Best estimate from cycle history"),
             unsafe_allow_html=True,
         )
     with z:
         st.markdown(
-            render_card(
-                "Forecast confidence",
-                forecast_confidence,
-                "How stable your cycle timing looks",
-            ),
+            render_card("Forecast confidence", forecast_confidence, "How stable your cycle timing looks"),
             unsafe_allow_html=True,
         )
 
