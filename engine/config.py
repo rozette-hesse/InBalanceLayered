@@ -3,7 +3,11 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 ARTIFACTS_DIR = BASE_DIR / "artifacts"
 
+# Final user-facing phases
 PHASES = ["Menstrual", "Follicular", "Fertility", "Luteal"]
+
+# Non-menstrual phases predicted by Layer 2 / fusion
+NON_MENSTRUAL_PHASES = ["Follicular", "Fertility", "Luteal"]
 
 SUPPORTED_SYMPTOMS = [
     "headaches",
@@ -18,14 +22,14 @@ SUPPORTED_SYMPTOMS = [
     "bloating",
 ]
 
-PCA_EXTRA_INPUTS = [
-    "appetite",
-    "exerciselevel",
-]
-
-ALL_LAYER2_INPUTS = PCA_EXTRA_INPUTS + SUPPORTED_SYMPTOMS
-
 MUCUS_OPTIONS = ["dry", "sticky", "creamy", "eggwhite", "watery", "unknown"]
 
-LAYER1_WEIGHT = 0.5
-LAYER2_WEIGHT = 0.5
+# Tuned from your notebook
+LAYER1_WEIGHT = 0.2
+LAYER2_WEIGHT = 0.8
+
+# New artifact names from Colab
+LAYER2_PIPELINE_FILE = "layer2_vnext_pipeline.joblib"
+LAYER2_LABEL_ENCODER_FILE = "layer2_vnext_label_encoder.joblib"
+LAYER2_FEATURE_COLUMNS_FILE = "layer2_vnext_feature_columns.joblib"
+LAYER2_METADATA_FILE = "layer2_vnext_metadata.joblib"
