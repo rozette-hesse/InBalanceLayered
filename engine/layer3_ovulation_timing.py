@@ -1,8 +1,5 @@
 from typing import Dict
 
-from .config import NON_MENSTRUAL_PHASES
-
-
 PHASE_INDEX = {
     "Follicular": 0,
     "Fertility": 1,
@@ -22,7 +19,6 @@ def get_timing_status(layer1: Dict, layer2: Dict, period_start_logged: bool = Fa
     layer2_phase = layer2["top_phase"]
 
     if layer1_phase == "Menstrual":
-        # Before period is logged, treat layer1 menstrual tendency as late luteal / approaching period
         layer1_phase = "Luteal"
 
     if layer1_phase == layer2_phase:
@@ -59,14 +55,10 @@ def build_timing_note(layer1: Dict, layer2: Dict, timing_status: str, period_sta
         return f"History and body signals both support a {layer2_phase.lower()} pattern today."
 
     if timing_status == "Approaching ovulation earlier":
-        return (
-            f"Timing still leans {layer1_phase.lower()}, but symptoms suggest movement toward fertility sooner than expected."
-        )
+        return f"Timing still leans {layer1_phase.lower()}, but symptoms suggest movement toward fertility sooner than expected."
 
     if timing_status == "Approaching ovulation later":
-        return (
-            f"Timing suggested fertility, but current symptoms still look more {layer2_phase.lower()}."
-        )
+        return f"Timing suggested fertility, but current symptoms still look more {layer2_phase.lower()}."
 
     if timing_status == "Post-ovulation":
         return "Body signals suggest you may already be moving past the fertile window."
@@ -76,7 +68,7 @@ def build_timing_note(layer1: Dict, layer2: Dict, timing_status: str, period_sta
 
     days_to_period = layer1.get("days_until_next_period")
     if isinstance(days_to_period, int) and days_to_period <= 3:
-        return f"Timing is close to the expected period window, but no period start was logged yet."
+        return "Timing is close to the expected period window, but no period start was logged yet."
 
     return (
         f"History suggests {layer1_phase.lower()}, while body signals lean {layer2_phase.lower()}. "
