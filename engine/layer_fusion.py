@@ -1,6 +1,6 @@
 from typing import Dict, List, Optional
 
-from .config import LAYER1_WEIGHT, LAYER2_WEIGHT, NON_MENSTRUAL_PHASES, PHASES
+from .config import LAYER1_WEIGHT, LAYER2_WEIGHT, NON_MENSTRUAL_PHASES
 from .layer1_period_predictor import get_layer1_output
 from .layer2_model_predictor import get_layer2_output
 from .layer3_ovulation_timing import get_layer3_output
@@ -24,12 +24,6 @@ def has_symptom_input(
 
 
 def _map_layer1_to_non_menstrual(layer1_probs: Dict[str, float]) -> Dict[str, float]:
-    """
-    Layer 1 still has 4 classes.
-    For fusion before a period is logged:
-      - fold Menstrual mass into Luteal
-      - keep Follicular / Fertility / Luteal
-    """
     mapped = {
         "Follicular": float(layer1_probs.get("Follicular", 0.0)),
         "Fertility": float(layer1_probs.get("Fertility", 0.0)),
@@ -64,12 +58,7 @@ def _constrain_non_menstrual_probs(
     signal_confidence = layer2.get("signal_confidence", "low")
     symptom_phase = layer2.get("top_phase", baseline_phase)
 
-    # If layer2 is weak and contradictory, keep baseline tighter
-    if (
-        signal_confidence == "low"
-        and prob_gap < 0.20
-        and baseline_phase != symptom_phase
-    ):
+    if signal_confidence == "low" and prob_gap < 0.20 and baseline_phase != symptom_phase:
         allowed = {baseline_phase}
 
     constrained = {}
@@ -115,7 +104,6 @@ def get_fused_output(
     layer1_probs_3 = _map_layer1_to_non_menstrual(layer1["phase_probs"])
     layer1_non_menstrual_top = _get_layer1_non_menstrual_top_phase(layer1_probs_3)
 
-    # Hard override for actual period start
     if period_start_logged:
         final_phase_probs = {
             "Menstrual": 1.0,
@@ -138,7 +126,6 @@ def get_fused_output(
             "final_phase": "Menstrual",
         }
 
-    # No symptom input -> rely on timing only, but still keep result non-menstrual
     if not has_symptom_input(
         symptoms=symptoms,
         cervical_mucus=cervical_mucus,
