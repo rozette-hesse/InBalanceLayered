@@ -1,13 +1,13 @@
 import sys
 from pathlib import Path
 from datetime import date
+
+import streamlit as st
 import streamlit.components.v1 as components
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
-
-import streamlit as st
 
 from engine.config import MUCUS_OPTIONS
 from engine.layer_fusion import get_fused_output
@@ -119,6 +119,7 @@ def hero_card(cycle_day, phase, daily_status, next_period, next_period_window_te
         padding:28px;
         box-shadow:0 8px 24px rgba(15,23,42,0.06);
         margin-bottom:18px;
+        font-family: Arial, sans-serif;
     ">
         <div style="font-size:14px;color:#6b7280;margin-bottom:8px;">Today</div>
         <div style="font-size:42px;font-weight:800;color:#111827;line-height:1;">Cycle day {cycle_day}</div>
@@ -260,18 +261,18 @@ if run:
         if next_period_window else "N/A"
     )
 
-   components.html(
-    hero_card(
-        cycle_day=cycle_day,
-        phase=phase,
-        daily_status=daily_status,
-        next_period=next_period,
-        next_period_window_text=next_period_window_text,
-        timing_note=timing_note,
-    ),
-    height=320,
-    scrolling=False,
-)
+    components.html(
+        hero_card(
+            cycle_day=cycle_day,
+            phase=phase,
+            daily_status=daily_status,
+            next_period=next_period,
+            next_period_window_text=next_period_window_text,
+            timing_note=timing_note,
+        ),
+        height=320,
+        scrolling=False,
+    )
 
     ovulation_date = result["layer1"].get("possible_ovulation_date") or "N/A"
     fertile_window = result["layer1"].get("fertile_window")
@@ -283,29 +284,29 @@ if run:
 
     w, x, y, z = st.columns([1.1, 1.2, 1.4, 1.0])
 
-with w:
-    st.markdown(
-        render_card("Next period date", next_period or "N/A", "Best estimate"),
-        unsafe_allow_html=True,
-    )
+    with w:
+        st.markdown(
+            render_card("Next period date", next_period or "N/A", "Best estimate"),
+            unsafe_allow_html=True,
+        )
 
-with x:
-    st.markdown(
-        render_card("Estimated ovulation", ovulation_date, "Forecast estimate"),
-        unsafe_allow_html=True,
-    )
+    with x:
+        st.markdown(
+            render_card("Estimated ovulation", ovulation_date, "Forecast estimate"),
+            unsafe_allow_html=True,
+        )
 
-with y:
-    st.markdown(
-        render_card("Fertile window", fertile_window_text, "Best estimate from cycle history"),
-        unsafe_allow_html=True,
-    )
+    with y:
+        st.markdown(
+            render_card("Fertile window", fertile_window_text, "Best estimate from cycle history"),
+            unsafe_allow_html=True,
+        )
 
-with z:
-    st.markdown(
-        render_card("Forecast confidence", forecast_confidence, "How stable your cycle timing looks"),
-        unsafe_allow_html=True,
-    )
+    with z:
+        st.markdown(
+            render_card("Forecast confidence", forecast_confidence, "How stable your cycle timing looks"),
+            unsafe_allow_html=True,
+        )
 
     if result["layer3"] is not None:
         explain = result["layer3"]["timing_note"]
