@@ -1,87 +1,100 @@
 from typing import Dict
 
+from .config import NON_MENSTRUAL_PHASES
+
 
 PHASE_INDEX = {
-    "Menstrual": 0,
-    "Follicular": 1,
-    "Fertility": 2,
-    "Luteal": 3,
+    "Follicular": 0,
+    "Fertility": 1,
+    "Luteal": 2,
 }
 
 
-def phase_distance(a: str, b: str) -> int:
+def _phase_distance(a: str, b: str) -> int:
     return abs(PHASE_INDEX[a] - PHASE_INDEX[b])
 
 
-def get_timing_status(layer1: Dict, layer2: Dict, bleeding_today: bool = False) -> str:
-    layer1_phase = max(layer1["phase_probs"], key=layer1["phase_probs"].get)
+def get_timing_status(layer1: Dict, layer2: Dict, period_start_logged: bool = False) -> str:
+    if period_start_logged:
+        return "Period started"
+
+    layer1_phase = layer1.get("top_phase", max(layer1["phase_probs"], key=layer1["phase_probs"].get))
     layer2_phase = layer2["top_phase"]
 
-    if bleeding_today:
-        return "Period started"
+    if layer1_phase == "Menstrual":
+        # Before period is logged, treat layer1 menstrual tendency as late luteal / approaching period
+        layer1_phase = "Luteal"
 
     if layer1_phase == layer2_phase:
         return "On track"
 
-    dist = phase_distance(layer1_phase, layer2_phase)
+    dist = _phase_distance(layer1_phase, layer2_phase)
 
     if dist == 1:
         if layer1_phase == "Follicular" and layer2_phase == "Fertility":
-            return "Possibly earlier than expected"
+            return "Approaching ovulation earlier"
         if layer1_phase == "Fertility" and layer2_phase == "Follicular":
-            return "Possibly later than expected"
+            return "Approaching ovulation later"
         if layer1_phase == "Fertility" and layer2_phase == "Luteal":
-            return "Possibly earlier than expected"
+            return "Post-ovulation"
         if layer1_phase == "Luteal" and layer2_phase == "Fertility":
-            return "Possibly later than expected"
-        if layer1_phase == "Luteal" and layer2_phase == "Menstrual":
-            return "Period approaching"
-        return "Timing uncertain this cycle"
+            return "Fertility signal stronger than timing"
+        if layer1_phase == "Luteal" and layer2_phase == "Follicular":
+            return "Timing uncertain this cycle"
 
     return "Timing uncertain this cycle"
 
 
-def build_timing_note(layer1: Dict, layer2: Dict, timing_status: str, bleeding_today: bool = False) -> str:
-    layer1_phase = max(layer1["phase_probs"], key=layer1["phase_probs"].get)
-    layer2_phase = layer2["top_phase"]
-    fertility_status = layer2["fertility_status"]
+def build_timing_note(layer1: Dict, layer2: Dict, timing_status: str, period_start_logged: bool = False) -> str:
+    if period_start_logged:
+        return "You logged a period start today, so the app resets the cycle and marks today as menstrual."
 
-    if bleeding_today:
-        return "Bleeding was logged today, so the cycle is treated as menstrual."
+    layer1_phase = layer1.get("top_phase", max(layer1["phase_probs"], key=layer1["phase_probs"].get))
+    if layer1_phase == "Menstrual":
+        layer1_phase = "Luteal"
+
+    layer2_phase = layer2["top_phase"]
 
     if timing_status == "On track":
         return f"History and body signals both support a {layer2_phase.lower()} pattern today."
 
-    if timing_status == "Possibly earlier than expected":
+    if timing_status == "Approaching ovulation earlier":
         return (
-            f"History suggests {layer1_phase.lower()}, but body signals look a little further ahead "
-            f"toward {layer2_phase.lower()}."
+            f"Timing still leans {layer1_phase.lower()}, but symptoms suggest movement toward fertility sooner than expected."
         )
 
-    if timing_status == "Possibly later than expected":
+    if timing_status == "Approaching ovulation later":
         return (
-            f"History suggests {layer1_phase.lower()}, but body signals look a little earlier "
-            f"than expected."
+            f"Timing suggested fertility, but current symptoms still look more {layer2_phase.lower()}."
         )
 
-    if timing_status == "Period approaching":
-        return (
-            f"History suggests late luteal timing, and body signals may indicate that the period is approaching."
-        )
+    if timing_status == "Post-ovulation":
+        return "Body signals suggest you may already be moving past the fertile window."
+
+    if timing_status == "Fertility signal stronger than timing":
+        return "Timing leans late-cycle, but current body signals still show stronger fertility signs."
+
+    days_to_period = layer1.get("days_until_next_period")
+    if isinstance(days_to_period, int) and days_to_period <= 3:
+        return f"Timing is close to the expected period window, but no period start was logged yet."
 
     return (
-        f"History suggests {layer1_phase.lower()}, while body signals lean {layer2_phase.lower()} "
-        f"({fertility_status}). The pattern is not specific enough to confidently change the phase."
+        f"History suggests {layer1_phase.lower()}, while body signals lean {layer2_phase.lower()}. "
+        f"The pattern is not specific enough to fully shift the timing interpretation."
     )
 
 
-def get_layer3_output(layer1: Dict, layer2: Dict, bleeding_today: bool = False) -> Dict:
-    timing_status = get_timing_status(layer1, layer2, bleeding_today=bleeding_today)
-    timing_note = build_timing_note(layer1, layer2, timing_status, bleeding_today=bleeding_today)
+def get_layer3_output(layer1: Dict, layer2: Dict, period_start_logged: bool = False) -> Dict[str, object]:
+    timing_status = get_timing_status(layer1, layer2, period_start_logged=period_start_logged)
+    timing_note = build_timing_note(layer1, layer2, timing_status, period_start_logged=period_start_logged)
+
+    history_phase = layer1.get("top_phase", max(layer1["phase_probs"], key=layer1["phase_probs"].get))
+    if history_phase == "Menstrual":
+        history_phase = "Luteal"
 
     return {
         "timing_status": timing_status,
         "timing_note": timing_note,
-        "history_phase": max(layer1["phase_probs"], key=layer1["phase_probs"].get),
+        "history_phase": history_phase,
         "symptom_phase": layer2["top_phase"],
     }
