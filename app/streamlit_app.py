@@ -214,8 +214,10 @@ cervical_mucus = st.selectbox(
     MUCUS_OPTIONS,
     index=MUCUS_OPTIONS.index("unknown") if "unknown" in MUCUS_OPTIONS else 0,
 )
-st.subheader("Bleeding")
-bleeding_today = st.checkbox("Bleeding today")
+
+st.subheader("Period start")
+period_start_logged = st.checkbox("I started my period today")
+
 run = st.button("Run prediction", type="primary")
 
 if run:
@@ -228,11 +230,11 @@ if run:
     selected_symptoms = parse_selected_symptoms(symptom_state)
 
     result = get_fused_output(
-    period_starts=period_starts,
-    symptoms=selected_symptoms,
-    cervical_mucus=cervical_mucus,
-    bleeding_today=bleeding_today,
-)
+        period_starts=period_starts,
+        symptoms=selected_symptoms,
+        cervical_mucus=cervical_mucus,
+        period_start_logged=period_start_logged,
+    )
 
     bleed_lengths = compute_bleed_lengths(period_rows)
     avg_bleed_length = safe_avg(bleed_lengths)
@@ -240,8 +242,16 @@ if run:
     next_period = result["layer1"].get("predicted_next_period")
     cycle_day = result["layer1"].get("cycle_day")
     phase = result["final_phase"]
-    daily_status = result["layer2"]["fertility_status"] if result["layer2"] else "Need More Data"
-    timing_note = result["layer3"]["timing_status"] if result["layer3"] else "Based on cycle history only"
+
+    if result["layer2"] is not None:
+        daily_status = result["layer2"]["fertility_status"]
+    else:
+        daily_status = "Need More Data" if phase != "Menstrual" else "Period Logged"
+
+    if result["layer3"] is not None:
+        timing_note = result["layer3"]["timing_status"]
+    else:
+        timing_note = "Based on cycle history only"
 
     next_period_window = result["layer1"].get("next_period_window")
     next_period_window_text = (
@@ -298,7 +308,6 @@ if run:
             unsafe_allow_html=True,
         )
 
-    explain = ""
     if result["layer3"] is not None:
         explain = result["layer3"]["timing_note"]
     elif result["layer2"] is not None:
